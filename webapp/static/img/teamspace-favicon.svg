@@ -1,11 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-  <defs>
-    <linearGradient id="fg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#4F46E5"/>
-      <stop offset="100%" stop-color="#6366F1"/>
-    </linearGradient>
-  </defs>
-  <rect width="32" height="32" rx="8" fill="url(#fg)"/>
-  <rect x="6" y="9" width="13" height="10" rx="2.5" fill="white" opacity="0.95"/>
-  <path d="M20 11.5 L25 9 L25 19 L20 16.5 Z" fill="white" opacity="0.8"/>
+  <title>Teamspace</title>
+  <rect width="32" height="32" rx="8" fill="#4F46E5"/>
+  <rect x="8" y="9" width="16" height="5" rx="2.5" fill="#FFFFFF"/>
+  <rect x="13.5" y="9" width="5" height="14" rx="2.5" fill="#FFFFFF"/>
 </svg>
