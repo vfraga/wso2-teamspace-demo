@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t('idp_title') }} — Teamspace{% endblock %}
+
+{% block content %}
+<div class="idp-page">
+    <div class="page-header">
+        <div class="page-header-left">
+            <h1>{{ _t('idp_title') }}</h1>
+            <p class="subtitle">{{ _t('card_idp_desc') }}</p>
+        </div>
+        <div class="page-header-actions">
+            <a href="{{ url_for('admin.idp_form', org_handle=org_handle) }}" class="btn btn-primary">{{ _t('idp_add_connection') }}</a>
+        </div>
+    </div>
+
+    {% if api_debug %}
+    <details class="api-detail">
+        <summary>API Details</summary>
+        <div class="api-detail-content">
+            {% with debug=api_debug %}
+            {% include "components/api_detail.html" %}
+            {% endwith %}
+        </div>
+    </details>
+    {% endif %}
+
+    {% if idps %}
+    <div class="idp-list">
+        {% for connection in idps %}
+        <div class="idp-card">
+            <h3>{{ connection.name }}</h3>
+            <p>{{ _t('idp_type') }}: {{ connection.type or 'OIDC' }}</p>
+            <span class="badge">{{ _t('idp_enabled') if connection.isEnabled else _t('idp_disabled') }}</span>
+            <div class="card-actions" style="margin-top: var(--space-4); display: flex; gap: var(--space-2);">
+                <a href="{{ url_for('admin.edit_idp_form', org_handle=org_handle, idp_id=connection.id) }}" class="btn btn-sm btn-outline">{{ _t('idp_edit') }}</a>
+                <form method="POST" action="{{ url_for('admin.delete_idp', org_handle=org_handle, idp_id=connection.id) }}" style="display:inline;" onsubmit="return confirm('{{ _t('idp_confirm_delete') }}');">
+                    <button type="submit" class="btn btn-sm btn-danger">{{ _t('idp_delete') }}</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>{{ _t('idp_no_connections') }}</p>
+        <p>{{ _t('idp_no_connections_desc') }}</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

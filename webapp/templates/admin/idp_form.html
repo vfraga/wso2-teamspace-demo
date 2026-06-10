@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t('idp_add_title') }} — Teamspace{% endblock %}
+
+{% block content %}
+<div class="idp-form-page">
+    <div class="page-header">
+        <h1>{{ _t('idp_add_title') }}</h1>
+        <a href="{{ url_for('admin.idp', org_handle=org_handle) }}" class="btn btn-outline btn-sm">{{ _t('idp_back_to_connections') }}</a>
+    </div>
+
+    <form method="POST" action="{{ url_for('admin.add_idp', org_handle=org_handle) }}">
+        <!-- Tabs/Section headers -->
+        <div class="settings-tabs" style="display: flex; gap: var(--space-4); margin-bottom: var(--space-6); border-bottom: 1px solid var(--border-light); padding-bottom: var(--space-2);">
+            <h3 style="font-size: 1.15rem; font-weight: 700; margin: 0; color: var(--org-primary, var(--primary)); border-bottom: 2px solid var(--org-primary, var(--primary)); padding-bottom: var(--space-2);">{{ _t('idp_connection_settings') }}</h3>
+        </div>
+
+        <div class="form-section">
+            <div class="form-group">
+                <label for="name">{{ _t('idp_connection_name') }}</label>
+                <input type="text" id="name" name="name" required placeholder="e.g. Corporate-IDP">
+            </div>
+
+            <div class="form-group">
+                <label for="client_id">{{ _t('idp_client_id') }}</label>
+                <input type="text" id="client_id" name="client_id" required placeholder="OAuth client ID">
+            </div>
+
+            <div class="form-group">
+                <label for="client_secret">{{ _t('idp_client_secret') }}</label>
+                <input type="password" id="client_secret" name="client_secret" required placeholder="{{ _t('idp_client_secret_placeholder') }}">
+            </div>
+
+            <div class="form-group">
+                <label for="auth_endpoint">{{ _t('idp_auth_endpoint') }}</label>
+                <input type="url" id="auth_endpoint" name="auth_endpoint" required placeholder="https://idp.example.com/oauth2/authorize">
+            </div>
+
+            <div class="form-group">
+                <label for="token_endpoint">{{ _t('idp_token_endpoint') }}</label>
+                <input type="url" id="token_endpoint" name="token_endpoint" required placeholder="https://idp.example.com/oauth2/token">
+            </div>
+
+            <div class="form-group">
+                <label for="jwks_uri">{{ _t('idp_jwks_uri') }}</label>
+                <input type="url" id="jwks_uri" name="jwks_uri" placeholder="https://idp.example.com/oauth2/jwks">
+                <small class="helper-text" style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-top: 4px;">
+                    {{ _t('idp_jwks_helper') }}
+                </small>
+            </div>
+
+            <div class="form-group">
+                <label for="userinfo_endpoint">{{ _t('idp_userinfo_endpoint') }}</label>
+                <input type="url" id="userinfo_endpoint" name="userinfo_endpoint" placeholder="https://idp.example.com/oauth2/userinfo">
+                <small class="helper-text" style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-top: 4px;">
+                    {{ _t('idp_jwks_helper') }}
+                </small>
+            </div>
+
+            <div class="form-group">
+                <label for="logout_endpoint">{{ _t('idp_logout_endpoint') }}</label>
+                <input type="url" id="logout_endpoint" name="logout_endpoint" placeholder="https://idp.example.com/oidc/logout">
+                <small class="helper-text" style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-top: 4px;">
+                    {{ _t('idp_jwks_helper') }}
+                </small>
+            </div>
+
+            <div class="form-group">
+                <label for="scopes">{{ _t('idp_scopes') }}</label>
+                <input type="text" id="scopes" name="scopes" value="openid email profile groups" placeholder="openid email profile groups">
+                <small class="helper-text" style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-top: 4px;">
+                    {{ _t('idp_scopes_helper') }}
+                </small>
+            </div>
+
+
+            <div class="form-group checkbox-group" style="display: flex; align-items: center; gap: var(--space-2); margin: var(--space-4) 0;">
+                <input type="checkbox" id="jit_enabled" name="jit_enabled" value="true" checked style="width: auto; margin: 0;">
+                <label for="jit_enabled" style="margin: 0; font-weight: 600; cursor: pointer;">{{ _t('idp_enable_jit') }}</label>
+            </div>
+        </div>
+
+        <div class="settings-tabs" style="display: flex; gap: var(--space-4); margin-top: var(--space-8); margin-bottom: var(--space-6); border-bottom: 1px solid var(--border-light); padding-bottom: var(--space-2);">
+            <h3 style="font-size: 1.15rem; font-weight: 700; margin: 0; color: var(--org-primary, var(--primary)); border-bottom: 2px solid var(--org-primary, var(--primary)); padding-bottom: var(--space-2);">{{ _t('idp_group_role_mappings') }}</h3>
+        </div>
+
+        <div class="form-section">
+            <div class="form-group">
+                <label for="group_attribute">{{ _t('idp_group_attribute') }}</label>
+                <input type="text" id="group_attribute" name="group_attribute" value="groups" required placeholder="e.g. groups">
+                <small class="helper-text" style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-top: 4px;">
+                    {{ _t('idp_group_attribute_helper') }}
+                </small>
+            </div>
+
+            <div class="form-group">
+                <label for="groups">{{ _t('idp_external_groups') }}</label>
+                <input type="text" id="groups" name="groups" placeholder="e.g. admin, user, manager">
+                <small class="helper-text" style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-top: 4px;">
+                    {{ _t('idp_external_groups_helper') }}
+                </small>
+            </div>
+
+            <div class="role-mappings-container" style="margin-top: var(--space-6); background: var(--bg-warm); padding: var(--space-5); border-radius: var(--radius-lg); border: 1px solid var(--border);">
+                <h4 style="margin-top: 0; margin-bottom: var(--space-4); font-size: 1rem; font-weight: 700;">{{ _t('idp_role_mappings') }}</h4>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: var(--space-5);">
+                    {{ _t('idp_role_mappings_desc') }}
+                </p>
+
+                {% if roles %}
+                    <div style="display: flex; flex-direction: column; gap: var(--space-4);">
+                    {% for role in roles %}
+                        <div class="role-mapping-row" style="background: var(--card-bg); padding: var(--space-4); border-radius: var(--radius); border: 1px solid var(--border-light); display: flex; flex-direction: column; gap: var(--space-2);">
+                            <span style="font-weight: 700; font-size: 0.95rem; color: var(--text);">{{ role.displayName }}</span>
+                            <div class="groups-checkbox-group" data-role-id="{{ role.id }}" data-role-name="{{ role.displayName }}" style="display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: 4px;">
+                                <span style="font-size: 0.85rem; color: var(--text-muted); font-style: italic;">
+                                    {{ _t('idp_add_external_groups_first') }}
+                                </span>
+                            </div>
+                        </div>
+                    {% endfor %}
+                    </div>
+                {% else %}
+                    <p style="font-size: 0.875rem; color: var(--text-muted); font-style: italic; margin: 0;">
+                        {{ _t('idp_no_roles_found') }}
+                    </p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="form-actions" style="margin-top: var(--space-8); display: flex; gap: var(--space-3);">
+            <button type="submit" class="btn btn-primary">{{ _t('idp_create_connection') }}</button>
+            <a href="{{ url_for('admin.idp', org_handle=org_handle) }}" class="btn btn-outline">{{ _t('idp_cancel') }}</a>
+        </div>
+    </form>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const groupsInput = document.getElementById('groups');
+    const roleMappingContainers = document.querySelectorAll('.groups-checkbox-group');
+
+    function updateCheckboxes() {
+        const val = groupsInput.value;
+        const groups = val.split(',')
+            .map(g => g.trim())
+            .filter(g => g.length > 0);
+
+        roleMappingContainers.forEach(container => {
+            const roleId = container.dataset.roleId;
+            
+            // Save currently checked values so we don't lose them when redrawing
+            const checkedValues = new Set();
+            container.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+                checkedValues.add(cb.value);
+            });
+
+            container.innerHTML = '';
+
+            if (groups.length === 0) {
+                container.innerHTML = `
+                    <span style="font-size: 0.85rem; color: var(--text-muted); font-style: italic;">
+                        {{ _t('idp_add_external_groups_first') }}
+                    </span>
+                `;
+                return;
+            }
+
+            groups.forEach(gname => {
+                const label = document.createElement('label');
+                label.className = 'checkbox-label';
+                label.style = 'display: flex; align-items: center; gap: var(--space-2); font-weight: 500; font-size: 0.875rem; cursor: pointer; margin: 0;';
+                
+                const isChecked = checkedValues.has(gname);
+                
+                label.innerHTML = `
+                    <input type="checkbox" name="role_groups[${roleId}]" value="${gname}" ${isChecked ? 'checked' : ''} style="width: auto; margin: 0;">
+                    ${gname}
+                `;
+                container.appendChild(label);
+            });
+        });
+    }
+
+    groupsInput.addEventListener('input', updateCheckboxes);
+    // Initial trigger
+    updateCheckboxes();
+});
+</script>
+{% endblock %}

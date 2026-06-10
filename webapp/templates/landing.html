@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block public_content %}
+<div class="landing" {% if branding %}style="--org-primary: {{ branding.primary_color or '#4F46E5' }}; --org-secondary: {{ branding.secondary_color or '#E0E7FF' }};"{% endif %}>
+    <div class="landing-hero">
+        {% if branding and branding.logo_url %}
+        <img src="{{ branding.logo_url }}" alt="{{ branding.logo_alt_text or 'Logo' }}" class="landing-logo">
+        {% else %}
+        <img src="{{ url_for('static', filename='img/teamspace-logo.svg') }}" alt="Teamspace" class="landing-logo">
+        {% endif %}
+
+        {% if branding %}
+        <h1 class="landing-branded-title">{{ _t('welcome_branded') }}</h1>
+        <p class="landing-tagline">{{ _t('welcome_branded_tagline') }}</p>
+        {% else %}
+        <h1>Teamspace</h1>
+        <p class="landing-tagline">{{ _t('welcome_tagline') }}</p>
+        {% endif %}
+
+        <div class="landing-actions">
+            {% if org_handle %}
+            <a href="{{ url_for('main.login', org_handle=org_handle) }}" class="btn btn-primary btn-lg">{{ _t('landing_sign_in') }}</a>
+            {% else %}
+            <a href="{{ url_for('main.login') }}" class="btn btn-primary btn-lg">{{ _t('landing_sign_in') }}</a>
+            <a href="{{ url_for('signup.signup_form') }}" class="btn btn-outline btn-lg">{{ _t('landing_get_started') }}</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if not org_handle %}
+    <div class="landing-plans">
+        <h2>{{ _t('landing_plans_title') }}</h2>
+        <div class="plan-cards">
+            <!-- Basic Plan -->
+            <div class="plan-card">
+                <h3>{{ _t('plan_basic') }}</h3>
+                <p class="plan-price">{{ _t('plan_free') }}</p>
+                <ul style="list-style: none; padding: 0; margin-top: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); text-align: left;">
+                    <li style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--text-secondary);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                        {{ _t('feature_manage_meetings') }}
+                    </li>
+                    <li style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--text-secondary);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                        {{ _t('feature_user_management') }}
+                    </li>
+                    <li style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--text-secondary);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                        {{ _t('feature_role_management') }}
+                    </li>
+                </ul>
+            </div>
+            
+            <!-- Business Plan -->
+            <div class="plan-card">
+                <span class="plan-badge">{{ _t('plan_popular') }}</span>
+                <h3>{{ _t('plan_business') }}</h3>
+                <p class="plan-price">$5<small>{{ _t('plan_price_period') }}</small></p>
+                <ul style="list-style: none; padding: 0; margin-top: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); text-align: left;">
+                    <li style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--text-secondary);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                        {{ _t('feature_everything_in_basic') }}
+                    </li>
+                    <li style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--text-secondary);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                        {{ _t('feature_basic_branding') }}
+                    </li>
+                    <li style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--text-secondary);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                        {{ _t('feature_custom_logo_colors') }}
+                    </li>
+                </ul>
+            </div>
+            
+            <!-- Enterprise Plan -->
+            <div class="plan-card">
+                <h3>{{ _t('plan_enterprise') }}</h3>
+                <p class="plan-price">$9<small>{{ _t('plan_price_period') }}</small></p>
+                <ul style="list-style: none; padding: 0; margin-top: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); text-align: left;">
+                    <li style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--text-secondary);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                        {{ _t('feature_everything_in_business') }}
+                    </li>
+                    <li style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--text-secondary);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                        {{ _t('feature_advanced_branding') }}
+                    </li>
+                    <li style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--text-secondary);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                        {{ _t('feature_federated_idp') }}
+                    </li>
+                    <li style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--text-secondary);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                        {{ _t('feature_security_settings') }}
+                    </li>
+                    <li style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--text-secondary);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                        {{ _t('feature_ai_agents') }}
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

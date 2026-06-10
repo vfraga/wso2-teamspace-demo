@@ -1,0 +1,28 @@
+<div class="jwt-viewer" x-data="{ tab: 'payload' }" style="display: flex; flex-direction: column; gap: var(--space-4); height: 100%;">
+    <div class="jwt-tabs">
+        <button :class="{ 'active': tab === 'header' }" @click="tab = 'header'">{{ _t('chat_jwt_header') }}</button>
+        <button :class="{ 'active': tab === 'payload' }" @click="tab = 'payload'">{{ _t('chat_jwt_payload') }}</button>
+        <button :class="{ 'active': tab === 'raw' }" @click="tab = 'raw'">{{ _t('chat_jwt_raw') }}</button>
+    </div>
+    
+    <div x-show="tab === 'header'" style="flex: 1; min-height: 0; overflow-y: auto;">
+        <pre style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; background: #0F172A; color: #38BDF8; padding: var(--space-4); border-radius: var(--radius); border: 1.5px solid #1E293B; white-space: pre-wrap !important; word-wrap: break-word; word-break: break-all; line-height: 1.5; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);"><code style="color: #F43F5E;">{{ jwt_data.header | tojson(indent=2) if jwt_data.header else '{}' }}</code></pre>
+    </div>
+    
+    <div x-show="tab === 'payload'" style="flex: 1; min-height: 0; overflow-y: auto;">
+        <pre style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; background: #0F172A; color: #38BDF8; padding: var(--space-4); border-radius: var(--radius); border: 1.5px solid #1E293B; white-space: pre-wrap !important; word-wrap: break-word; word-break: break-all; line-height: 1.5; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);"><code style="color: #A855F7;">{{ jwt_data.payload | tojson(indent=2) if jwt_data.payload else '{}' }}</code></pre>
+    </div>
+    
+    <div x-show="tab === 'raw'" style="flex: 1; min-height: 0; overflow-y: auto;">
+        {% if jwt_raw %}
+            {% set parts = jwt_raw.split('.') %}
+            {% if parts|length == 3 %}
+                <pre class="jwt-raw" style="font-family: 'JetBrains Mono', monospace; font-size: 0.775rem; word-break: break-all; white-space: pre-wrap !important; line-height: 1.5; padding: var(--space-4); background: #0F172A; border-radius: var(--radius); border: 1.5px solid #1E293B; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);"><span style="color: #F43F5E; font-weight: 700;">{{ parts[0] }}</span>.<span style="color: #A855F7; font-weight: 700;">{{ parts[1] }}</span>.<span style="color: #06B6D4; font-weight: 700;">{{ parts[2] }}</span></pre>
+            {% else %}
+                <pre class="jwt-raw" style="font-family: 'JetBrains Mono', monospace; font-size: 0.775rem; word-break: break-all; white-space: pre-wrap !important; line-height: 1.5; padding: var(--space-4); background: #0F172A; border-radius: var(--radius); border: 1.5px solid #1E293B; color: #94A3B8; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);"><code>{{ jwt_raw }}</code></pre>
+            {% endif %}
+        {% else %}
+            <pre class="jwt-raw" style="font-family: 'JetBrains Mono', monospace; font-size: 0.775rem; padding: var(--space-4); background: #0F172A; border-radius: var(--radius); border: 1.5px solid #1E293B; color: #94A3B8;"><code>{}</code></pre>
+        {% endif %}
+    </div>
+</div>

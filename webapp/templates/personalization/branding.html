@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t('nav_personalization') }} — Teamspace{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/branding.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="brand-studio" x-data="{
+    logo: '{{ current.logo_url if current else '' }}',
+    logoAlt: '{{ current.logo_alt_text if current else '' }}',
+    favicon: '{{ current.favicon_url if current else '' }}',
+    primary: '{{ current.primary_color if current else '#4F46E5' }}',
+    secondary: '{{ current.secondary_color if current else '#E0E7FF' }}',
+    showReset: false,
+    previewTab: 'login'
+}">
+    <!-- Header -->
+    <div class="page-header">
+        <div class="page-header-left">
+            <h1>{{ _t('branding_studio_title') }}</h1>
+            <p class="subtitle">{{ _t('branding_studio_desc') }}</p>
+        </div>
+        <div class="page-header-actions">
+            <button type="button" class="btn btn-outline btn-sm" @click="showReset = true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                {{ _t('branding_studio_reset') }}
+            </button>
+        </div>
+    </div>
+
+    <div class="brand-studio-layout">
+        <!-- ── Left: Form ────────────────────────────────── -->
+        <form method="POST" action="{{ url_for('personalization.update_branding', org_handle=org_handle) }}" class="brand-form">
+
+            <!-- Identity Section -->
+            <div class="brand-section">
+                <div class="brand-section-header">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                    <h3>{{ _t('branding_studio_identity') }}</h3>
+                </div>
+
+                <div class="brand-field">
+                    <label for="logo_url">{{ _t('branding_studio_logo_url') }}</label>
+                    <input type="url" id="logo_url" name="logo_url"
+                           x-model="logo"
+                           placeholder="https://example.com/logo.svg">
+                    <span class="form-hint">{{ _t('branding_studio_logo_hint') }}</span>
+                </div>
+
+                <div class="brand-field">
+                    <label for="logo_alt_text">{{ _t('branding_studio_alt_text') }}</label>
+                    <input type="text" id="logo_alt_text" name="logo_alt_text"
+                           x-model="logoAlt"
+                           placeholder="{{ _t('branding_studio_alt_text_placeholder') }}">
+                </div>
+            </div>
+
+            <!-- Colors Section -->
+            <div class="brand-section">
+                <div class="brand-section-header">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+                    <h3>{{ _t('branding_studio_colors') }}</h3>
+                </div>
+
+                <div class="color-pickers">
+                    <div class="color-field">
+                        <label for="primary_color">{{ _t('branding_studio_primary') }}</label>
+                        <div class="color-input-group">
+                            <input type="color" id="primary_color" name="primary_color"
+                                   x-model="primary" class="color-swatch">
+                            <input type="text" x-model="primary"
+                                   class="color-hex" maxlength="7"
+                                   pattern="#[0-9a-fA-F]{6}">
+                        </div>
+                        <span class="form-hint">{{ _t('branding_studio_primary_hint') }}</span>
+                    </div>
+                    <div class="color-field">
+                        <label for="secondary_color">{{ _t('branding_studio_secondary') }}</label>
+                        <div class="color-input-group">
+                            <input type="color" id="secondary_color" name="secondary_color"
+                                   x-model="secondary" class="color-swatch">
+                            <input type="text" x-model="secondary"
+                                   class="color-hex" maxlength="7"
+                                   pattern="#[0-9a-fA-F]{6}">
+                        </div>
+                        <span class="form-hint">{{ _t('branding_studio_secondary_hint') }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Advanced Section (Enterprise) -->
+            <div class="brand-section {% if not is_advanced %}brand-section-locked{% endif %}">
+                <div class="brand-section-header">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                    <h3>{{ _t('branding_studio_advanced') }}</h3>
+                    {% if not is_advanced %}
+                    <span class="badge">{{ _t('plan_enterprise') }}</span>
+                    {% endif %}
+                </div>
+
+                {% if is_advanced %}
+                <div class="brand-field">
+                    <label for="favicon_url">{{ _t('branding_studio_favicon_url') }}</label>
+                    <input type="url" id="favicon_url" name="favicon_url"
+                           x-model="favicon"
+                           placeholder="https://example.com/favicon.svg">
+                    <span class="form-hint">{{ _t('branding_studio_favicon_hint') }}</span>
+                </div>
+                {% else %}
+                <div class="locked-overlay">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    <p>{{ _t('branding_studio_favicon_lock_desc') | safe }}</p>
+                    <a href="{{ url_for('subscription.plans', org_handle=org_handle) }}" class="btn btn-sm btn-outline">{{ _t('branding_studio_view_plans') }}</a>
+                </div>
+                <input type="hidden" name="favicon_url" value="{{ current.favicon_url if current else '' }}">
+                {% endif %}
+            </div>
+
+            <div class="brand-form-footer">
+                <button type="submit" class="btn btn-primary">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                    {{ _t('branding_studio_save_sync') }}
+                </button>
+                <span class="form-hint" style="margin-top: 0; align-self: center;">{{ _t('branding_studio_sync_hint') }}</span>
+            </div>
+        </form>
+
+        <!-- ── Right: Live Preview ───────────────────────── -->
+        <div class="brand-preview-panel">
+            <div class="preview-chrome">
+                <div class="preview-tabs">
+                    <button type="button" :class="{ 'active': previewTab === 'login' }" @click="previewTab = 'login'">{{ _t('branding_studio_preview_login') }}</button>
+                    <button type="button" :class="{ 'active': previewTab === 'sidebar' }" @click="previewTab = 'sidebar'">{{ _t('branding_studio_preview_sidebar') }}</button>
+                </div>
+            </div>
+
+            <!-- Login Preview -->
+            <div class="preview-canvas" x-show="previewTab === 'login'" x-transition>
+                <div class="preview-login-bg" :style="'background: linear-gradient(180deg, ' + secondary + '22 0%, #F8F7F4 100%)'">
+                    <div class="preview-login-card">
+                        <template x-if="logo">
+                            <img :src="logo" :alt="logoAlt || 'Logo'" class="preview-login-logo">
+                        </template>
+                        <template x-if="!logo">
+                            <div class="preview-login-logo-placeholder" :style="'background:' + primary + '18; color:' + primary">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                            </div>
+                        </template>
+                        <div class="preview-login-title">{{ _t('branding_studio_preview_signin_lbl') }}</div>
+                        <div class="preview-input-mock"></div>
+                        <div class="preview-input-mock"></div>
+                        <div class="preview-btn-mock" :style="'background:' + primary">{{ _t('branding_studio_preview_signin_lbl') }}</div>
+                        <div class="preview-login-footer-mock">{{ _t('login_dont_have_account') }} <span :style="'color:' + primary">{{ _t('branding_studio_preview_register_lbl') }}</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sidebar Preview -->
+            <div class="preview-canvas" x-show="previewTab === 'sidebar'" x-transition x-cloak>
+                <div class="preview-sidebar-layout">
+                    <div class="preview-sidebar-mock">
+                        <div class="preview-sidebar-brand">
+                            <template x-if="logo">
+                                <img :src="logo" :alt="logoAlt || 'Logo'" class="preview-sidebar-logo">
+                            </template>
+                            <template x-if="!logo">
+                                <div class="preview-sidebar-logo-placeholder"></div>
+                            </template>
+                            <span class="preview-sidebar-title">{{ current_user.org_name or _t('branding_studio_preview_default_org') }}</span>
+                        </div>
+                        <div class="preview-sidebar-items">
+                            <div class="preview-sidebar-item active" :style="'border-left-color:' + primary">
+                                <span class="preview-sidebar-icon">
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                                        <polyline points="9 22 9 12 15 12 15 22"/>
+                                    </svg>
+                                </span>
+                                <span>{{ _t('nav_home') }}</span>
+                            </div>
+                            <div class="preview-sidebar-item">
+                                <span class="preview-sidebar-icon">
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                                        <line x1="16" y1="2" x2="16" y2="6"/>
+                                        <line x1="8" y1="2" x2="8" y2="6"/>
+                                        <line x1="3" y1="10" x2="21" y2="10"/>
+                                    </svg>
+                                </span>
+                                <span>{{ _t('nav_meetings') }}</span>
+                            </div>
+                            <div class="preview-sidebar-item">
+                                <span class="preview-sidebar-icon">
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                                        <circle cx="9" cy="7" r="4"/>
+                                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                                    </svg>
+                                </span>
+                                <span>{{ _t('nav_users') }}</span>
+                            </div>
+                            <div class="preview-sidebar-item">
+                                <span class="preview-sidebar-icon">
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 14.7255 3.09032 17.1962 4.85857 19C5.03345 19.1749 5.09312 19.4344 5.01174 19.6702C4.85857 20.1139 4.75 20.5849 4.75 21C4.75 21.5523 5.19772 22 5.75 22H12Z"/>
+                                        <circle cx="7.5" cy="10.5" r="1.5" fill="currentColor"/>
+                                        <circle cx="11.5" cy="7.5" r="1.5" fill="currentColor"/>
+                                        <circle cx="16.5" cy="9.5" r="1.5" fill="currentColor"/>
+                                        <circle cx="15.5" cy="14.5" r="1.5" fill="currentColor"/>
+                                    </svg>
+                                </span>
+                                <span>{{ _t('nav_personalization') }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="preview-main-mock">
+                        <div class="preview-topbar-mock"></div>
+                        <div class="preview-content-mock">
+                            <div class="preview-card-mock"></div>
+                            <div class="preview-card-mock"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reset Confirmation Modal -->
+    <div class="modal-backdrop" x-show="showReset" x-transition.opacity x-cloak @click.self="showReset = false">
+        <div class="modal-card" x-show="showReset" x-transition>
+            <h3>{{ _t('branding_studio_reset_confirm_title') }}</h3>
+            <p>{{ _t('branding_studio_reset_confirm_desc') }}</p>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-outline btn-sm" @click="showReset = false">{{ _t('roles_cancel') }}</button>
+                <form method="POST" action="{{ url_for('personalization.reset_branding', org_handle=org_handle) }}" style="display:inline">
+                    <button type="submit" class="btn btn-danger btn-sm">{{ _t('branding_studio_reset_to_defaults') }}</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

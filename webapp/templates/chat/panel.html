@@ -1,0 +1,264 @@
+<div class="chat-panel" x-data="{ open: localStorage.getItem('chat_open') === 'true' }">
+    <button class="chat-toggle" @click="open = !open; localStorage.setItem('chat_open', open); document.documentElement.classList.toggle('chat-ui-open', open); if(!open) { resetChatToDefault(); }" :class="{ 'active': open }" style="display: flex; align-items: center; justify-content: center;">
+        <span x-show="!open" x-cloak style="display: inline-flex; align-items: center; gap: 6px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            {{ _t('chat_toggle_label') }}
+        </span>
+        <span x-show="open" x-cloak style="font-size: 1.5rem; line-height: 1; display: none; align-items: center;">&times;</span>
+    </button>
+
+    {% if has_agent_config %}
+    <div id="jwt-inspector-container" class="jwt-inspector-container" x-show="open" style="display: none;">
+        <div class="jwt-inspector" x-data="{ currentTab: 'comparison' }" style="display: flex; flex-direction: column; height: 100%; width: 100%;">
+            <div class="jwt-inspector-header" style="display: flex; justify-content: space-between; align-items: center; padding-bottom: var(--space-4); border-bottom: 1.5px solid var(--border-light); margin-bottom: var(--space-4);">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="badge" style="background: var(--warning-light); color: var(--warning); font-weight: 600; padding: 2px 8px; border-radius: var(--radius-sm); font-size: 0.75rem;">{{ _t('chat_obo_pending') }}</span>
+                    <h4 style="margin: 0; font-size: 0.95rem; font-weight: 700;">{{ _t('chat_token_inspector') }}</h4>
+                </div>
+                <button class="btn-close" onclick="document.getElementById('jwt-inspector-container').style.display = 'none'" style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--text-muted);">&times;</button>
+            </div>
+
+            <!-- Inspector Tabs -->
+            <div class="jwt-tabs" style="display: flex; gap: 4px; margin-bottom: var(--space-4);">
+                <button :class="{ 'active': currentTab === 'comparison' }" @click="currentTab = 'comparison'" style="flex: 1; text-align: center;">{{ _t('chat_tab_comparison') }}</button>
+                <button :class="{ 'active': currentTab === 'user' }" @click="currentTab = 'user'" style="flex: 1; text-align: center;">{{ _t('chat_tab_user') }}</button>
+                <button :class="{ 'active': currentTab === 'obo' }" @click="currentTab = 'obo'" style="flex: 1; text-align: center;">{{ _t('chat_tab_obo') }}</button>
+                <button :class="{ 'active': currentTab === 'agent' }" @click="currentTab = 'agent'" style="flex: 1; text-align: center;">{{ _t('chat_tab_agent') }}</button>
+            </div>
+
+            <!-- Tab Contents -->
+            <div x-show="currentTab === 'comparison'" style="flex: 1; overflow-y: auto;">
+                {% with user_token=session.get('access_token_claims', {}), obo_token={}, agent_token={} %}
+                    {% include "components/jwt_comparison.html" %}
+                {% endwith %}
+            </div>
+
+            <div x-show="currentTab === 'user'" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column;">
+                <div style="background: var(--org-secondary, var(--primary-glow)); border: 1px dashed var(--org-primary, var(--primary)); padding: var(--space-3) var(--space-4); border-radius: var(--radius); font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4; display: flex; align-items: flex-start; gap: 8px; margin-bottom: var(--space-3);">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink:0; margin-top:2px;"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg>
+                    <span>{{ _t('chat_user_desc') }}</span>
+                </div>
+                {% with jwt_data=decode_jwt(session.get('access_token')) if session.get('access_token') else {}, jwt_raw=session.get('access_token') %}
+                    {% include "components/jwt_viewer.html" %}
+                {% endwith %}
+            </div>
+
+            <div x-show="currentTab === 'obo'" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column;">
+                <div style="background: var(--org-secondary, var(--primary-glow)); border: 1px dashed var(--org-primary, var(--primary)); padding: var(--space-3) var(--space-4); border-radius: var(--radius); font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4; display: flex; align-items: flex-start; gap: 8px; margin-bottom: var(--space-3);">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink:0; margin-top:2px;"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg>
+                    <span>{{ _t('chat_obo_desc') }}</span>
+                </div>
+                {% with jwt_data={}, jwt_raw=None %}
+                    {% include "components/jwt_viewer.html" %}
+                {% endwith %}
+            </div>
+
+            <div x-show="currentTab === 'agent'" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column;">
+                <div style="background: var(--org-secondary, var(--primary-glow)); border: 1px dashed var(--org-primary, var(--primary)); padding: var(--space-3) var(--space-4); border-radius: var(--radius); font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4; display: flex; align-items: flex-start; gap: 8px; margin-bottom: var(--space-3);">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink:0; margin-top:2px;"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg>
+                    <span>{{ _t('chat_agent_desc') }}</span>
+                </div>
+                {% with jwt_data={}, jwt_raw=None %}
+                    {% include "components/jwt_viewer.html" %}
+                {% endwith %}
+            </div>
+        </div>
+    </div>
+
+    <div class="chat-window" x-show="open" x-transition style="display: none;">
+        <div class="chat-header">
+            <h3>{{ _t('assistant_title') }}</h3>
+            <p class="text-muted">{{ _t('assistant_subtitle') }}</p>
+        </div>
+
+        <div id="chat-messages" class="chat-messages">
+            <div class="chat-message system">
+                <p>{{ _t('chat_greeting') }}</p>
+            </div>
+        </div>
+
+        <form class="chat-input" onsubmit="submitChat(event)">
+            <input type="text" name="message" placeholder="{{ _t('assistant_placeholder') }}" autocomplete="off" required>
+            <button type="submit" class="btn btn-primary btn-sm">{{ _t('assistant_send') }}</button>
+        </form>
+    </div>
+    {% else %}
+    <div class="chat-window" x-show="open" x-transition style="display: none;">
+        <div class="chat-header">
+            <h3>{{ _t('assistant_title') }}</h3>
+            <p class="text-muted">{{ _t('assistant_subtitle') }}</p>
+        </div>
+        <div class="chat-disabled-state">
+            <div class="disabled-icon">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </div>
+            <h4>{{ _t('assistant_offline') }}</h4>
+            <p>{{ _t('assistant_offline_desc') }}</p>
+            {% if is_admin %}
+            <a href="{{ url_for('agents.list_agents', org_handle=org_handle) }}" class="btn btn-primary btn-configure">{{ _t('assistant_configure') }}</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+    window.CHAT_AUTHORIZED_MSG = {{ _t('chat_authorized_msg') | tojson }};
+    function saveChatHistory() {
+        const messages = document.getElementById('chat-messages');
+        if (messages) {
+            sessionStorage.setItem('chat_history_html', messages.innerHTML);
+        }
+    }
+
+    function resetChatToDefault() {
+        sessionStorage.removeItem('chat_history_html');
+        sessionStorage.removeItem('jwt_inspector_html');
+        sessionStorage.removeItem('jwt_inspector_display');
+        const messages = document.getElementById('chat-messages');
+        if (messages) {
+            messages.innerHTML = `
+                <div class="chat-message system">
+                    <p>${ {{ _t('chat_greeting') | tojson }} }</p>
+                </div>
+            `;
+        }
+        const inspector = document.getElementById('jwt-inspector-container');
+        if (inspector) {
+            inspector.style.display = 'none';
+        }
+        fetch("{{ url_for('chat.clear_chat', org_handle=current_user.org_handle) }}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        }).catch(err => console.error('Error clearing chat session:', err));
+    }
+
+    async function submitChat(event) {
+        event.preventDefault();
+        const form = event.target;
+        const input = form.querySelector('input[name="message"]');
+        const message = input.value.trim();
+        if (!message) return;
+        
+        input.value = '';
+        
+        const messagesContainer = document.getElementById('chat-messages');
+        if (!messagesContainer) return;
+        
+        // Add user message to UI immediately
+        const userMsgDiv = document.createElement('div');
+        userMsgDiv.className = 'chat-message user';
+        const userPara = document.createElement('p');
+        userPara.textContent = message;
+        userMsgDiv.appendChild(userPara);
+        messagesContainer.appendChild(userMsgDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        
+        saveChatHistory();
+        
+        // Create assistant message container
+        const assistantMsgDiv = document.createElement('div');
+        assistantMsgDiv.className = 'chat-message assistant thinking-state';
+        const assistantPara = document.createElement('p');
+        assistantPara.className = 'thinking-indicator';
+        assistantPara.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
+        assistantMsgDiv.appendChild(assistantPara);
+        messagesContainer.appendChild(assistantMsgDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        
+        try {
+            const response = await fetch("{{ url_for('chat.send_message_stream', org_handle=current_user.org_handle) }}", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({ message: message })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let fullText = '';
+            let jsonBuffer = '';
+            let isParsingMetadata = false;
+            
+            // Remove thinking classes/indicator
+            assistantMsgDiv.classList.remove('thinking-state');
+            assistantPara.className = '';
+            assistantPara.innerHTML = '';
+            
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                const chunk = decoder.decode(value, { stream: true });
+                
+                if (chunk.includes('__METADATA_START__')) {
+                    const parts = chunk.split('__METADATA_START__');
+                    fullText += parts[0];
+                    assistantPara.innerHTML = DOMPurify.sanitize(fullText);
+                    jsonBuffer = parts[1] || '';
+                    isParsingMetadata = true;
+                } else if (isParsingMetadata) {
+                    jsonBuffer += chunk;
+                } else {
+                    fullText += chunk;
+                    assistantPara.innerHTML = DOMPurify.sanitize(fullText);
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }
+            
+            saveChatHistory();
+            
+            if (jsonBuffer) {
+                try {
+                    const metadata = JSON.parse(jsonBuffer.trim());
+                    if (metadata.inspector_html) {
+                        const inspectorContainer = document.getElementById('jwt-inspector-container');
+                        if (inspectorContainer) {
+                            inspectorContainer.outerHTML = metadata.inspector_html;
+                            const newInspector = document.getElementById('jwt-inspector-container');
+                            if (newInspector) {
+                                newInspector.style.display = 'flex';
+                                sessionStorage.setItem('jwt_inspector_html', newInspector.innerHTML);
+                                sessionStorage.setItem('jwt_inspector_display', 'flex');
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("Failed to parse metadata JSON:", e, jsonBuffer);
+                }
+            }
+        } catch (e) {
+            console.error("Stream error:", e);
+            assistantMsgDiv.classList.remove('thinking-state');
+            assistantPara.className = '';
+            assistantPara.innerHTML = 'Error communicating with assistant. Please try again.';
+            saveChatHistory();
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const savedHistory = sessionStorage.getItem('chat_history_html');
+        if (savedHistory) {
+            const container = document.getElementById('chat-messages');
+            if (container) {
+                container.innerHTML = DOMPurify.sanitize(savedHistory);
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+        
+        const savedInspector = sessionStorage.getItem('jwt_inspector_html');
+        if (savedInspector) {
+            const container = document.getElementById('jwt-inspector-container');
+            if (container) {
+                container.innerHTML = savedInspector;
+                container.style.display = sessionStorage.getItem('jwt_inspector_display') || 'none';
+            }
+        }
+    });
+</script>

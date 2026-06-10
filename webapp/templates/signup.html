@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block public_content %}
+<script>sessionStorage.clear();</script>
+<div class="signup-page" x-data="{ step: 1, name: '', handle: '', edited: false, plan: 'basic' }">
+    <div class="signup-card">
+        <h1>{{ _t('signup_register_org') }}</h1>
+
+        <div class="signup-steps">
+            <span class="step" :class="{ 'active': step >= 1 }">{{ _t('signup_details') }}</span>
+            <span class="step" :class="{ 'active': step >= 2 }">{{ _t('signup_plan') }}</span>
+        </div>
+
+        <form method="POST" action="{{ url_for('signup.register') }}">
+
+            <div x-show="step === 1">
+                <p>{{ _t('signup_tagline') }}</p>
+
+                <fieldset>
+                    <legend>{{ _t('signup_org_legend') }}</legend>
+                    <label for="org_name">{{ _t('signup_org_name') }}</label>
+                    <input type="text" id="org_name" name="org_name" required placeholder="e.g. Elite Solutions"
+                           x-model="name" @input="if (!edited) handle = name.toLowerCase().replace(/[^\w\s-]/g, '').replace(/[\s_]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')">
+                    <label for="org_handle">{{ _t('signup_org_handle') }}</label>
+                    <input type="text" id="org_handle" name="org_handle" required placeholder="e.g. elite-solutions"
+                           x-model="handle" @input="edited = true" pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
+                           title="Lowercase letters, numbers, and hyphens only">
+                    <small>{{ _t('signup_org_handle_help') }} <code>/o/<span x-text="handle || '...'"></span>/</code></small>
+                </fieldset>
+
+                <fieldset>
+                    <legend>{{ _t('signup_admin_legend') }}</legend>
+                    <div class="form-row">
+                        <div>
+                            <label for="first_name">{{ _t('signup_first_name') }}</label>
+                            <input type="text" id="first_name" name="first_name" required>
+                        </div>
+                        <div>
+                            <label for="last_name">{{ _t('signup_last_name') }}</label>
+                            <input type="text" id="last_name" name="last_name" required>
+                        </div>
+                    </div>
+                    <label for="email">{{ _t('signup_email') }}</label>
+                    <input type="email" id="email" name="email" required placeholder="you@company.com">
+                    <label for="password">{{ _t('signup_password') }}</label>
+                    <input type="password" id="password" name="password" required minlength="8">
+                </fieldset>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-primary btn-block" @click="step = 2">{{ _t('signup_next') }} &rarr;</button>
+                </div>
+            </div>
+
+            <div x-show="step === 2" x-cloak>
+                <p>{{ _t('signup_choose_plan') }}</p>
+
+                <div class="plan-cards signup-plans">
+                    <label class="plan-card" :class="{ 'selected': plan === 'basic' }" @click="plan = 'basic'">
+                        <input type="radio" name="plan" value="basic" x-model="plan" class="sr-only">
+                        <h3>{{ _t('plan_basic') }}</h3>
+                        <p class="plan-price">{{ _t('plan_free') }}</p>
+                        <ul style="list-style: none; padding: 0; margin-top: var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); text-align: left;">
+                            <li style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                                {{ _t('feature_manage_meetings') }}
+                            </li>
+                            <li style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                                {{ _t('feature_user_management') }}
+                            </li>
+                            <li style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                                {{ _t('feature_role_management') }}
+                            </li>
+                        </ul>
+                    </label>
+ 
+                    <label class="plan-card" :class="{ 'selected': plan === 'business' }" @click="plan = 'business'">
+                        <input type="radio" name="plan" value="business" x-model="plan" class="sr-only">
+                        <span class="plan-badge">{{ _t('plan_popular') }}</span>
+                        <h3>{{ _t('plan_business') }}</h3>
+                        <p class="plan-price">$5<small>{{ _t('plan_price_period') }}</small></p>
+                        <ul style="list-style: none; padding: 0; margin-top: var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); text-align: left;">
+                            <li style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                                {{ _t('feature_everything_in_basic') }}
+                            </li>
+                            <li style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                                {{ _t('feature_basic_branding') }}
+                            </li>
+                            <li style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                                {{ _t('feature_custom_logo_colors') }}
+                            </li>
+                        </ul>
+                    </label>
+ 
+                    <label class="plan-card" :class="{ 'selected': plan === 'enterprise' }" @click="plan = 'enterprise'">
+                        <input type="radio" name="plan" value="enterprise" x-model="plan" class="sr-only">
+                        <h3>{{ _t('plan_enterprise') }}</h3>
+                        <p class="plan-price">$9<small>{{ _t('plan_price_period') }}</small></p>
+                        <ul style="list-style: none; padding: 0; margin-top: var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); text-align: left;">
+                            <li style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                                {{ _t('feature_everything_in_business') }}
+                            </li>
+                            <li style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                                {{ _t('feature_advanced_branding') }}
+                            </li>
+                            <li style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                                {{ _t('feature_federated_idp') }}
+                            </li>
+                            <li style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                                {{ _t('feature_security_settings') }}
+                            </li>
+                            <li style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink: 0;"><polyline points="20 6 9 17 4 12"/></svg>
+                                {{ _t('feature_ai_agents') }}
+                            </li>
+                        </ul>
+                    </label>
+                </div>
+
+                <div class="form-actions" style="display:flex;gap:1rem;">
+                    <button type="button" class="btn btn-outline" @click="step = 1">&larr; {{ _t('signup_back') }}</button>
+                    <button type="submit" class="btn btn-primary btn-block">{{ _t('signup_create_org') }}</button>
+                </div>
+            </div>
+        </form>
+
+        <p class="signup-footer">
+            {{ _t('signup_already_have_account') }} <a href="{{ url_for('main.login') }}">{{ _t('signup_sign_in') }}</a>
+        </p>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t('security_title') }} — Teamspace{% endblock %}
+
+{% block content %}
+<div class="security-page">
+    <div class="page-header">
+        <div class="page-header-left">
+            <h1>{{ _t('security_title') }}</h1>
+            <p class="subtitle">{{ _t('security_desc') }}</p>
+        </div>
+    </div>
+
+    <div class="security-cards">
+        {% if has_role('idp-manager') %}
+        {# Full access: user has the idp-manager role #}
+        <div class="security-card" style="display: flex; flex-direction: column; justify-content: space-between; min-height: 280px;">
+            <div>
+                <div class="feature-icon" style="margin-bottom: var(--space-4);">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="2" y1="12" x2="22" y2="12"/>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                    </svg>
+                </div>
+                <h3 style="margin-bottom: var(--space-2); font-size: 1.2rem; font-weight: 700;">{{ _t('card_idp_title') }}</h3>
+                <p style="margin-bottom: var(--space-6); color: var(--text-secondary); line-height: 1.5;">{{ _t('security_idp_desc') }}</p>
+            </div>
+            <a href="{{ url_for('admin.idp', org_handle=org_handle) }}" class="btn btn-outline" style="align-self: flex-start;">{{ _t('security_manage_idp') }}</a>
+        </div>
+        {% elif org_plan == 'enterprise' %}
+        {# Org has Enterprise plan but user lacks the role #}
+        <div class="security-card locked" style="display: flex; flex-direction: column; justify-content: space-between; min-height: 280px;">
+            <div>
+                <div class="feature-icon" style="margin-bottom: var(--space-4);">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="2" y1="12" x2="22" y2="12"/>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                    </svg>
+                </div>
+                <h3 style="margin-bottom: var(--space-2); font-size: 1.2rem; font-weight: 700;">{{ _t('card_idp_title') }}</h3>
+                <p style="margin-bottom: var(--space-6); color: var(--text-secondary); line-height: 1.5;">{{ _t('security_idp_desc') }}</p>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2);">
+                <span style="font-size: 0.85rem; color: var(--text-secondary);">{{ _t('card_idp_role_desc') | safe }}</span>
+                <span class="badge" style="background: var(--warning-light, #fef3cd); color: #856404; border: 1px solid #ffeaa7;">{{ _t('card_personalization_role_required') }}</span>
+            </div>
+        </div>
+        {% else %}
+        {# Org needs to upgrade to Enterprise #}
+        <div class="security-card locked" style="display: flex; flex-direction: column; justify-content: space-between; min-height: 280px;">
+            <div>
+                <div class="feature-icon" style="margin-bottom: var(--space-4);">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="2" y1="12" x2="22" y2="12"/>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                    </svg>
+                </div>
+                <h3 style="margin-bottom: var(--space-2); font-size: 1.2rem; font-weight: 700;">{{ _t('card_idp_title') }}</h3>
+                <p style="margin-bottom: var(--space-6); color: var(--text-secondary); line-height: 1.5;">{{ _t('security_idp_desc') }}</p>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2);">
+                <a href="{{ url_for('subscription.plans', org_handle=org_handle) }}" class="btn btn-outline">{{ _t('security_upgrade_plan') }}</a>
+                <span class="badge">{{ _t('plan_enterprise') }}</span>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if has_role('idp-manager') %}
+        {# Full access: user has the idp-manager role #}
+        <div class="security-card" style="display: flex; flex-direction: column; justify-content: space-between; min-height: 280px;">
+            <div>
+                <div class="feature-icon" style="margin-bottom: var(--space-4);">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                </div>
+                <h3 style="margin-bottom: var(--space-2); font-size: 1.2rem; font-weight: 700;">{{ _t('security_login_flow_title') }}</h3>
+                <p style="margin-bottom: var(--space-6); color: var(--text-secondary); line-height: 1.5;">{{ _t('security_login_flow_desc') }}</p>
+            </div>
+            <a href="{{ url_for('admin.login_flow', org_handle=org_handle) }}" class="btn btn-primary" style="align-self: flex-start;">{{ _t('security_configure_login_flow') }}</a>
+        </div>
+        {% elif org_plan == 'enterprise' %}
+        {# Org has Enterprise plan but user lacks the role #}
+        <div class="security-card locked" style="display: flex; flex-direction: column; justify-content: space-between; min-height: 280px;">
+            <div>
+                <div class="feature-icon" style="margin-bottom: var(--space-4);">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                </div>
+                <h3 style="margin-bottom: var(--space-2); font-size: 1.2rem; font-weight: 700;">{{ _t('security_login_flow_title') }}</h3>
+                <p style="margin-bottom: var(--space-6); color: var(--text-secondary); line-height: 1.5;">{{ _t('security_login_flow_desc') }}</p>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2);">
+                <span style="font-size: 0.85rem; color: var(--text-secondary);">{{ _t('card_idp_role_desc') | safe }}</span>
+                <span class="badge" style="background: var(--warning-light, #fef3cd); color: #856404; border: 1px solid #ffeaa7;">{{ _t('card_personalization_role_required') }}</span>
+            </div>
+        </div>
+        {% else %}
+        {# Org needs to upgrade to Enterprise #}
+        <div class="security-card locked" style="display: flex; flex-direction: column; justify-content: space-between; min-height: 280px;">
+            <div>
+                <div class="feature-icon" style="margin-bottom: var(--space-4);">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                </div>
+                <h3 style="margin-bottom: var(--space-2); font-size: 1.2rem; font-weight: 700;">{{ _t('security_login_flow_title') }}</h3>
+                <p style="margin-bottom: var(--space-6); color: var(--text-secondary); line-height: 1.5;">{{ _t('security_login_flow_desc') }}</p>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2);">
+                <a href="{{ url_for('subscription.plans', org_handle=org_handle) }}" class="btn btn-primary">{{ _t('security_upgrade_plan') }}</a>
+                <span class="badge">{{ _t('plan_enterprise') }}</span>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

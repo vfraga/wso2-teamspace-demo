@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t('agents_title') }} — Teamspace{% endblock %}
+
+{% block content %}
+<div class="users-page">
+    <div class="page-header">
+        <div class="page-header-left">
+            <h1>{{ _t('agents_title') }}</h1>
+            <p class="subtitle">{{ _t('card_agents_desc') }}</p>
+        </div>
+        {% if not agent_config %}
+        <div class="page-header-actions">
+            <a href="{{ url_for('agents.agent_form', org_handle=org_handle) }}" class="btn btn-primary">{{ _t('agents_deploy_agent') }}</a>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if agent_config %}
+    <div class="meeting-card" style="margin-bottom: var(--space-6);">
+        <div class="meeting-info">
+            <h3>{{ agent_config.display_name }}</h3>
+            {% if agent_config.description %}
+            <p>{{ agent_config.description }}</p>
+            {% endif %}
+            <p class="meeting-time">{{ _t('agents_stored_config') }} ID: <code>{{ agent_config.agent_id }}</code></p>
+            <p class="meeting-tz">{{ _t('agents_gemini_key') }}: {{ _t('agents_gemini_configured') if agent_config.gemini_api_key else _t('agents_gemini_not_set') }}</p>
+            {% if agent_config.custom_prompt %}
+            <details style="margin-top: var(--space-2);">
+                <summary>{{ _t('agents_custom_prompt') }}</summary>
+                <pre style="white-space: pre-wrap; font-size: 0.85rem; margin-top: var(--space-2);">{{ agent_config.custom_prompt }}</pre>
+            </details>
+            {% endif %}
+        </div>
+        <div class="meeting-actions">
+            <form method="POST" action="{{ url_for('agents.delete_agent', org_handle=org_handle) }}">
+                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('{{ _t('agents_confirm_remove') }}')">{{ _t('agents_remove_agent') }}</button>
+            </form>
+        </div>
+    </div>
+
+    <details class="api-detail" style="margin-top: var(--space-4);">
+        <summary>{{ _t('agents_config_details') }}</summary>
+        <div class="api-detail-content">
+            <div class="api-section">
+                <h4>{{ _t('agents_stored_config') }}</h4>
+                <pre>{{ _t('agents_stored_config') }} ID: {{ agent_config.agent_id }}
+{{ _t('agents_gemini_key') }}: {{ _t('agents_gemini_configured') if agent_config.gemini_api_key else _t('agents_gemini_not_set') }}
+{{ _t('agents_custom_prompt_lbl') }}: {{ _t('agents_gemini_configured') if agent_config.custom_prompt else _t('agents_using_default') }}</pre>
+            </div>
+        </div>
+    </details>
+    {% else %}
+    <div class="empty-state">
+        <p>{{ _t('agents_no_agent') }}</p>
+        <p>{{ _t('agents_no_agent_desc') }}</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

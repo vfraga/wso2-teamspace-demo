@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t('nav_home') }} — Teamspace{% endblock %}
+
+{% block content %}
+<div class="dashboard-home">
+    <div class="page-header">
+        <div class="page-header-left">
+            <h1>{{ _t('welcome_title', name=current_user.name) }}</h1>
+            <p class="subtitle">{{ _t('welcome_subtitle', org_name=current_user.org_name) | safe }}</p>
+        </div>
+    </div>
+
+    <div class="feature-cards">
+        <a href="{{ url_for('dashboard.meetings', org_handle=org_handle) }}" class="feature-card">
+            <div class="feature-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m16 13l5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/>
+                    <rect width="14" height="12" x="2" y="6" rx="2"/>
+                </svg>
+            </div>
+            <h3>{{ _t('card_meetings_title') }}</h3>
+            <p>{{ _t('card_meetings_desc') }}</p>
+        </a>
+
+        {% if is_admin %}
+        <a href="{{ url_for('admin.users', org_handle=org_handle) }}" class="feature-card">
+            <div class="feature-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                    <circle cx="9" cy="7" r="4"/>
+                    <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                    <path d="M16 3.128a4 4 0 0 1 0 7.744"/>
+                </svg>
+            </div>
+            <h3>{{ _t('card_users_title') }}</h3>
+            <p>{{ _t('card_users_desc') }}</p>
+        </a>
+
+        <a href="{{ url_for('admin.roles', org_handle=org_handle) }}" class="feature-card">
+            <div class="feature-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
+                </svg>
+            </div>
+            <h3>{{ _t('card_roles_title') }}</h3>
+            <p>{{ _t('card_roles_desc') }}</p>
+        </a>
+        {% endif %}
+
+        {% if has_role('basic-branding-editor', 'advanced-branding-editor') %}
+        <a href="{{ url_for('personalization.branding', org_handle=org_handle) }}" class="feature-card">
+            <div class="feature-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22a1 1 0 0 1 0-20a10 9 0 0 1 10 9a5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/>
+                    <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/>
+                    <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
+                    <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/>
+                    <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
+                </svg>
+            </div>
+            <h3>{{ _t('card_personalization_title') }}</h3>
+            <p>{{ _t('card_personalization_desc') }}</p>
+        </a>
+        {% elif is_admin and org_plan in ('business', 'enterprise') %}
+        <a href="{{ url_for('personalization.branding', org_handle=org_handle) }}" class="feature-card locked">
+            <div class="feature-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22a1 1 0 0 1 0-20a10 9 0 0 1 10 9a5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/>
+                    <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/>
+                    <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
+                    <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/>
+                    <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
+                </svg>
+            </div>
+            <h3>{{ _t('card_personalization_title') }}</h3>
+            <p>{{ _t('card_personalization_role_desc') }}</p>
+            <span class="badge" style="background: #fef3cd; color: #856404; border: 1px solid #ffeaa7;">{{ _t('card_personalization_role_required') }}</span>
+        </a>
+        {% elif is_admin %}
+        <a href="{{ url_for('personalization.branding', org_handle=org_handle) }}" class="feature-card locked">
+            <div class="feature-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22a1 1 0 0 1 0-20a10 9 0 0 1 10 9a5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/>
+                    <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/>
+                    <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
+                    <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/>
+                    <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
+                </svg>
+            </div>
+            <h3>{{ _t('card_personalization_title') }}</h3>
+            <p>{{ _t('card_personalization_upgrade_desc') }}</p>
+            <span class="badge">{{ _t('badge_upgrade_required') }}</span>
+        </a>
+        {% endif %}
+
+        {% if has_role('idp-manager') %}
+        <a href="{{ url_for('admin.idp', org_handle=org_handle) }}" class="feature-card">
+            <div class="feature-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 2a14.5 14.5 0 0 0 0 20a14.5 14.5 0 0 0 0-20"/>
+                    <path d="M2 12h20"/>
+                </svg>
+            </div>
+            <h3>{{ _t('card_idp_title') }}</h3>
+            <p>{{ _t('card_idp_desc') }}</p>
+        </a>
+        {% elif is_admin and org_plan == 'enterprise' %}
+        <a href="{{ url_for('admin.idp', org_handle=org_handle) }}" class="feature-card locked">
+            <div class="feature-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 2a14.5 14.5 0 0 0 0 20a14.5 14.5 0 0 0 0-20"/>
+                    <path d="M2 12h20"/>
+                </svg>
+            </div>
+            <h3>{{ _t('card_idp_title') }}</h3>
+            <p>{{ _t('card_idp_role_desc') | safe }}</p>
+            <span class="badge" style="background: #fef3cd; color: #856404; border: 1px solid #ffeaa7;">{{ _t('card_personalization_role_required') }}</span>
+        </a>
+        {% elif is_admin %}
+        <a href="{{ url_for('admin.idp', org_handle=org_handle) }}" class="feature-card locked">
+            <div class="feature-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 2a14.5 14.5 0 0 0 0 20a14.5 14.5 0 0 0 0-20"/>
+                    <path d="M2 12h20"/>
+                </svg>
+            </div>
+            <h3>{{ _t('card_idp_title') }}</h3>
+            <p>{{ _t('card_idp_upgrade_desc') }}</p>
+            <span class="badge">{{ _t('badge_upgrade_required') }}</span>
+        </a>
+        {% endif %}
+
+        {% if has_role('teamspace-admin') and org_plan == 'enterprise' %}
+        <a href="{{ url_for('agents.list_agents', org_handle=org_handle) }}" class="feature-card">
+            <div class="feature-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 20v2m0-20v2m5 16v2m0-20v2M2 12h2m-2 5h2M2 7h2m16 5h2m-2 5h2M20 7h2M7 20v2M7 2v2"/>
+                    <rect width="16" height="16" x="4" y="4" rx="2"/>
+                    <rect width="8" height="8" x="8" y="8" rx="1"/>
+                </svg>
+            </div>
+            <h3>{{ _t('card_agents_title') }}</h3>
+            <p>{{ _t('card_agents_desc') }}</p>
+        </a>
+        {% elif is_admin and org_plan == 'enterprise' %}
+        <a href="{{ url_for('agents.list_agents', org_handle=org_handle) }}" class="feature-card locked">
+            <div class="feature-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 20v2m0-20v2m5 16v2m0-20v2M2 12h2m-2 5h2M2 7h2m16 5h2m-2 5h2M20 7h2M7 20v2M7 2v2"/>
+                    <rect width="16" height="16" x="4" y="4" rx="2"/>
+                    <rect width="8" height="8" x="8" y="8" rx="1"/>
+                </svg>
+            </div>
+            <h3>{{ _t('card_agents_title') }}</h3>
+            <p>{{ _t('card_agents_role_desc') | safe }}</p>
+            <span class="badge" style="background: #fef3cd; color: #856404; border: 1px solid #ffeaa7;">{{ _t('card_personalization_role_required') }}</span>
+        </a>
+        {% elif is_admin %}
+        <a href="{{ url_for('agents.list_agents', org_handle=org_handle) }}" class="feature-card locked">
+            <div class="feature-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 20v2m0-20v2m5 16v2m0-20v2M2 12h2m-2 5h2M2 7h2m16 5h2m-2 5h2M20 7h2M7 20v2M7 2v2"/>
+                    <rect width="16" height="16" x="4" y="4" rx="2"/>
+                    <rect width="8" height="8" x="8" y="8" rx="1"/>
+                </svg>
+            </div>
+            <h3>{{ _t('card_agents_title') }}</h3>
+            <p>{{ _t('card_agents_upgrade_desc') }}</p>
+            <span class="badge">{{ _t('badge_upgrade_required') }}</span>
+        </a>
+        {% endif %}
+
+        {% if is_admin %}
+        <a href="{{ url_for('subscription.plans', org_handle=org_handle) }}" class="feature-card">
+            <div class="feature-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect width="20" height="14" x="2" y="5" rx="2"/>
+                    <path d="M2 10h20"/>
+                </svg>
+            </div>
+            <h3>{{ _t('card_subscription_title') }}</h3>
+            <p>{{ _t('card_subscription_desc') }}</p>
+        </a>
+        {% endif %}
+    </div>
+
+    <details class="api-detail" style="margin-top: var(--space-10);">
+        <summary>Session & Token Debug</summary>
+        <div class="api-detail-content">
+            <div class="api-section">
+                <h4>Session Roles</h4>
+                <pre>{{ session.get('user_roles', []) | tojson(indent=2) }}</pre>
+            </div>
+            <div class="api-section">
+                <h4>is_admin</h4>
+                <pre>{{ session.get('is_admin', False) }}</pre>
+            </div>
+            <div class="api-section">
+                <h4>ID Token Claims (roles-related)</h4>
+                {% set id_raw = session.get('id_token_raw', '') %}
+                {% if id_raw %}
+                <pre>{{ id_token_debug | default('') }}</pre>
+                {% else %}
+                <pre>No id_token in session</pre>
+                {% endif %}
+            </div>
+        </div>
+    </details>
+</div>
+{% endblock %}

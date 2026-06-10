@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t('meetings_edit_meeting') if meeting else _t('meetings_schedule_meeting') }} — Teamspace{% endblock %}
+
+{% block content %}
+<div class="meeting-form-page">
+    <h1>{{ _t('meetings_edit_meeting') if meeting else _t('meetings_schedule_meeting') }}</h1>
+
+    <form method="POST"
+          action="{% if meeting %}{{ url_for('dashboard.update', org_handle=org_handle, meeting_id=meeting.id) }}{% else %}{{ url_for('dashboard.create', org_handle=org_handle) }}{% endif %}">
+
+        <label for="topic">{{ _t('meetings_topic') }}</label>
+        <input type="text" id="topic" name="topic" required value="{{ meeting.topic if meeting else '' }}" placeholder="{{ _t('meetings_topic_placeholder') }}">
+
+        <div class="form-row">
+            <div>
+                <label for="date">{{ _t('meetings_date') }}</label>
+                <input type="date" id="date" name="date" required value="{{ meeting.date if meeting else '' }}">
+            </div>
+            <div>
+                <label for="start_time">{{ _t('meetings_start_time') }}</label>
+                <input type="time" id="start_time" name="start_time" required value="{{ meeting.start_time if meeting else '' }}">
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div>
+                <label for="duration">{{ _t('meetings_duration') }}</label>
+                <input type="number" id="duration" name="duration" value="{{ meeting.duration if meeting else '60' }}" min="15" max="480">
+            </div>
+            <div>
+                <label for="time_zone">{{ _t('meetings_time_zone') }}</label>
+                <select id="time_zone" name="time_zone">
+                    <option value="America/Sao_Paulo" {{ 'selected' if meeting and meeting.time_zone == 'America/Sao_Paulo' }}>America/Sao_Paulo</option>
+                    <option value="America/New_York" {{ 'selected' if meeting and meeting.time_zone == 'America/New_York' }}>America/New_York</option>
+                    <option value="America/Chicago" {{ 'selected' if meeting and meeting.time_zone == 'America/Chicago' }}>America/Chicago</option>
+                    <option value="America/Los_Angeles" {{ 'selected' if meeting and meeting.time_zone == 'America/Los_Angeles' }}>America/Los_Angeles</option>
+                    <option value="Europe/London" {{ 'selected' if meeting and meeting.time_zone == 'Europe/London' }}>Europe/London</option>
+                    <option value="UTC" {{ 'selected' if meeting and meeting.time_zone == 'UTC' }}>UTC</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">{{ _t('meetings_update') if meeting else _t('meetings_schedule') }}</button>
+            <a href="{{ url_for('dashboard.meetings', org_handle=org_handle) }}" class="btn btn-outline">{{ _t('meetings_cancel') }}</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

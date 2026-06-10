@@ -1,0 +1,20 @@
+<header class="top-bar">
+    <div class="top-bar-left">
+    </div>
+    <div class="top-bar-right">
+        <div class="lang-switcher" style="display: flex; gap: var(--space-2); align-items: center; margin-right: var(--space-3);">
+            <a href="/set_lang?lang=en" style="font-size: 0.85rem; font-weight: {% if current_locale == 'en' %}700{% else %}400{% endif %}; color: {% if current_locale == 'en' %}var(--org-primary, var(--primary)){% else %}var(--text-secondary){% endif %}; text-decoration: none;">EN</a>
+            <span style="color: var(--border); font-size: 0.85rem;">|</span>
+            <a href="/set_lang?lang=pt" style="font-size: 0.85rem; font-weight: {% if current_locale == 'pt' %}700{% else %}400{% endif %}; color: {% if current_locale == 'pt' %}var(--org-primary, var(--primary)){% else %}var(--text-secondary){% endif %}; text-decoration: none;">PT</a>
+        </div>
+        <button onclick="toggleTheme()" class="btn btn-xs btn-outline" style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 50%; margin-right: var(--space-3);" title="Toggle Dark/Light Mode">
+            <svg class="sun-icon" style="display: none;" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+            <svg class="moon-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        </button>
+        <div class="user-profile" style="display: flex; flex-direction: column; text-align: right; line-height: 1.3; margin-right: var(--space-3); justify-content: center;">
+            <span class="user-name" style="font-weight: 600; font-size: 0.875rem; color: var(--text);">{{ current_user.name }} {{ current_user.family_name }}</span>
+            <span class="user-email" style="font-size: 0.75rem; color: var(--text-muted);">{{ current_user.email }}</span>
+        </div>
+        <a href="{{ url_for('main.logout') }}" class="btn btn-sm btn-outline">{{ _t('nav_sign_out') }}</a>
+    </div>
+</header>

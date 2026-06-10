@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="{{ current_locale | default('en') }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Teamspace{% endblock %}</title>
+    <script>
+        (function() {
+            const theme = localStorage.getItem('theme') || 'light';
+            if (theme === 'dark') {
+                document.documentElement.classList.add('dark-mode');
+            } else {
+                document.documentElement.classList.remove('dark-mode');
+            }
+            
+            // Sync chat open state synchronously to prevent load-time flickering
+            const chatOpen = localStorage.getItem('chat_open') === 'true';
+            if (chatOpen) {
+                document.documentElement.classList.add('chat-ui-open');
+            } else {
+                document.documentElement.classList.remove('chat-ui-open');
+            }
+        })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:wght@400;500;600&display=optional" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    {% if org_branding and org_branding.favicon_url %}
+    <link rel="icon" href="{{ org_branding.favicon_url }}">
+    {% elif branding and branding.favicon_url %}
+    <link rel="icon" href="{{ branding.favicon_url }}">
+    {% else %}
+    <link rel="icon" href="{{ url_for('static', filename='img/teamspace-favicon.svg') }}">
+    {% endif %}
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
+    {% set _b = org_branding or branding %}
+    {% if _b %}
+    <style>
+        :root {
+            --org-primary-base: {{ _b.primary_color or '#4F46E5' }};
+            --org-secondary-base: {{ _b.secondary_color or '#E0E7FF' }};
+            --org-primary: var(--org-primary-base);
+            --org-secondary: var(--org-secondary-base);
+            /* Readable text colour computed from each brand colour's luminance
+               (server-side, so it is reliable in every browser and theme). */
+            --org-primary-text: {{ contrast_text(_b.primary_color or '#4F46E5') }};
+            --org-secondary-text: {{ contrast_text(_b.secondary_color or '#E0E7FF') }};
+            --org-primary-glow: color-mix(in srgb, var(--org-primary-base) 12%, transparent);
+            --org-secondary-glow: color-mix(in srgb, var(--org-secondary-base) 15%, transparent);
+        }
+    </style>
+    {% endif %}
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="preload">
+    {% if current_user and current_user.org_handle %}
+    <div class="app-layout">
+        {% include "components/sidebar.html" %}
+        <div class="main-area">
+            {% include "components/header.html" %}
+            <main class="content">
+                {% include "components/flash_messages.html" %}
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+        {% include "chat/panel.html" %}
+    </div>
+    {% else %}
+    <div class="public-header" style="max-width: var(--content-max); margin: 0 auto; padding: var(--space-4) var(--space-8) 0; display: flex; justify-content: flex-end; gap: var(--space-5); align-items: center; position: relative; z-index: 10;">
+        <div class="lang-switcher" style="display: flex; gap: var(--space-2); align-items: center;">
+            <a href="/set_lang?lang=en" style="font-size: 0.85rem; font-weight: {% if current_locale == 'en' %}700{% else %}400{% endif %}; color: {% if current_locale == 'en' %}var(--org-primary, var(--primary)){% else %}var(--text-secondary){% endif %}; text-decoration: none;">EN</a>
+            <span style="color: var(--border); font-size: 0.85rem;">|</span>
+            <a href="/set_lang?lang=pt" style="font-size: 0.85rem; font-weight: {% if current_locale == 'pt' %}700{% else %}400{% endif %}; color: {% if current_locale == 'pt' %}var(--org-primary, var(--primary)){% else %}var(--text-secondary){% endif %}; text-decoration: none;">PT</a>
+        </div>
+        <button onclick="toggleTheme()" class="btn btn-xs btn-outline" style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 50%;" title="Toggle Dark/Light Mode">
+            <svg class="sun-icon" style="display: none;" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+            <svg class="moon-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        </button>
+    </div>
+    <div class="public-layout">
+        {% include "components/flash_messages.html" %}
+        {% block public_content %}{% endblock %}
+    </div>
+    {% endif %}
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+    function toggleTheme() {
+        const isDark = document.documentElement.classList.toggle('dark-mode');
+        localStorage.setItem('theme', isDark ? 'dark' : 'light');
+        updateThemeIcons();
+    }
+    function updateThemeIcons() {
+        const isDark = document.documentElement.classList.contains('dark-mode');
+        document.querySelectorAll('.sun-icon').forEach(el => el.style.display = isDark ? 'block' : 'none');
+        document.querySelectorAll('.moon-icon').forEach(el => el.style.display = isDark ? 'none' : 'block');
+    }
+    updateThemeIcons();
+    </script>
+    {% if config.DEBUG %}
+    {% if current_user and current_user.org_handle %}
+    <script>
+    console.group("%c[Teamspace Debug]", "color:#4F46E5;font-weight:bold");
+    console.log("current_user:", {{ current_user | tojson }});
+    console.log("is_admin:", {{ is_admin | tojson }});
+    console.log("session user_roles:", {{ session.get('user_roles', []) | tojson }});
+    console.log("session user_scopes:", {{ session.get('user_scopes', []) | tojson }});
+    console.groupEnd();
+    </script>
+    {% endif %}
+    {% endif %}
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                document.body.classList.remove('preload');
+            }, 50);
+        });
+    </script>
+</body>
+</html>

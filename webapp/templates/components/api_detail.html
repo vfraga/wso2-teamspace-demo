@@ -1,0 +1,23 @@
+<details class="api-detail" x-data="{ copied: false }">
+    <summary>{{ debug.method }} {{ debug.url }} &mdash; {{ debug.status_code }}</summary>
+    <div class="api-detail-content">
+        <div class="api-section">
+            <h4>Request</h4>
+            <pre><code>{{ debug.method }} {{ debug.url }}
+{% for k, v in debug.request_headers.items() %}{{ k }}: {{ v }}
+{% endfor %}
+{% if debug.request_body %}
+{{ debug.request_body | tojson(indent=2) }}{% endif %}</code></pre>
+        </div>
+        <div class="api-section">
+            <h4>Response ({{ debug.status_code }})</h4>
+            <pre><code>{% if debug.response_body %}{{ debug.response_body | tojson(indent=2) }}{% else %}(no body){% endif %}</code></pre>
+        </div>
+        <button class="btn btn-xs"
+                @click="navigator.clipboard.writeText($refs.curlCmd.textContent); copied = true; setTimeout(() => copied = false, 2000)">
+            <span x-show="!copied">Copy as cURL</span>
+            <span x-show="copied">Copied!</span>
+        </button>
+        <pre x-ref="curlCmd" style="display:none">{{ debug.curl }}</pre>
+    </div>
+</details>

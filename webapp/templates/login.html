@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block public_content %}
+<script>sessionStorage.clear();</script>
+<div class="login-page">
+    <div class="login-card">
+        <img src="{{ url_for('static', filename='img/teamspace-logo.svg') }}" alt="Teamspace" class="login-logo">
+        <h1>{{ _t('login_title') }}</h1>
+
+        {% if error %}
+        <div class="flash flash-error">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('main.login_post') }}" x-data="{ mode: 'org' }">
+            <div class="login-tabs">
+                <button type="button" :class="{ 'active': mode === 'org' }" @click="mode = 'org'">{{ _t('login_tab_org') }}</button>
+                <button type="button" :class="{ 'active': mode === 'email' }" @click="mode = 'email'">{{ _t('login_tab_email') }}</button>
+            </div>
+
+            <div x-show="mode === 'org'">
+                <label for="org_handle">{{ _t('signup_org_handle') }}</label>
+                <input type="text" id="org_handle" name="org_handle" placeholder="e.g. elite-solutions">
+            </div>
+
+            <div x-show="mode === 'email'" x-cloak>
+                <label for="email">{{ _t('login_email_address') }}</label>
+                <input type="email" id="email" name="email" placeholder="you@company.com">
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block">{{ _t('login_continue') }}</button>
+        </form>
+
+        <p class="login-footer">
+            {{ _t('login_dont_have_account') }} <a href="{{ url_for('signup.signup_form') }}">{{ _t('login_register_org') }}</a>
+        </p>
+    </div>
+</div>
+{% endblock %}

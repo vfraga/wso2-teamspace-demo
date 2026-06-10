@@ -1,0 +1,18 @@
+import pytest
+from unittest.mock import patch, AsyncMock
+from fastapi.testclient import TestClient
+from agent.main import app as agent_app
+
+def test_agent_main_app_structure():
+    client = TestClient(agent_app)
+    # A GET request to /chat should return 405 Method Not Allowed
+    resp = client.get("/chat")
+    assert resp.status_code == 405
+
+def test_chat_route_validation():
+    client = TestClient(agent_app)
+    # Request without required x-internal-secret should fail with 403 Forbidden (since secret is configured in conftest or config)
+    with patch("agent.main.settings") as mock_settings:
+        mock_settings.INTERNAL_SECRET = "my-secret-key"
+        resp = client.post("/chat", json={"thread_id": "t1", "message": "hello", "org_name": "org"})
+        assert resp.status_code == 403

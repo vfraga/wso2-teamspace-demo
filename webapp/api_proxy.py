@@ -1,0 +1,135 @@
+import logging
+from typing import Any, NamedTuple
+
+import requests
+from flask import session, current_app
+
+logger = logging.getLogger(__name__)
+
+
+class ApiResult(NamedTuple):
+    status_code: int
+    data: Any
+
+
+def api_request(method: str, path: str, token: str = None, **kwargs) -> requests.Response:
+    base = current_app.config["BUSINESS_API_URL"]
+    if not token:
+        token = session.get("access_token", "")
+    headers = kwargs.pop("headers", {})
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    headers.setdefault("Content-Type", "application/json")
+    url = f"{base}{path}"
+    try:
+        timeout = kwargs.pop("timeout", (3, 10))
+        resp = requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
+        if resp.status_code >= 400:
+            logger.error("Business API error: %s %s -> %s: %s", method.upper(), path, resp.status_code, resp.text[:200])
+        else:
+            logger.debug("Business API response: %s %s -> %s", method.upper(), path, resp.status_code)
+        return resp
+    except requests.exceptions.RequestException as e:
+        logger.error("Business API connection failed: %s %s -> %s", method.upper(), path, e)
+        mock_resp = requests.Response()
+        mock_resp.status_code = 503
+        mock_resp._content = b'{"detail": "Business API offline"}'
+        return mock_resp
+
+
+
+def _parse_response(resp: requests.Response) -> ApiResult:
+    try:
+        data = resp.json()
+    except ValueError:
+        data = resp.text
+    return ApiResult(status_code=resp.status_code, data=data)
+
+
+def get_meetings() -> list[dict[str, Any]]:
+    resp = api_request("GET", "/meetings")
+    if resp.status_code == 200:
+        return resp.json()
+    return []
+
+
+def create_meeting(data: dict) -> ApiResult:
+    return _parse_response(api_request("POST", "/meetings", json=data))
+
+
+def update_meeting(meeting_id: str, data: dict) -> ApiResult:
+    return _parse_response(api_request("PUT", f"/meetings/{meeting_id}", json=data))
+
+
+def delete_meeting(meeting_id: str) -> ApiResult:
+    return _parse_response(api_request("DELETE", f"/meetings/{meeting_id}"))
+
+
+def get_personalization(org_id: str) -> dict | None:
+    resp = api_request("GET", f"/personalization/org/{org_id}")
+    if resp.status_code == 200:
+        return resp.json()
+    return None
+
+
+def upsert_personalization(data: dict) -> ApiResult:
+    return _parse_response(api_request("POST", "/personalization", json=data))
+
+
+def delete_personalization(org_id: str) -> ApiResult:
+    return _parse_response(api_request("DELETE", f"/personalization/org/{org_id}"))
+
+
+def get_agent_config(org_id: str) -> dict | None:
+    resp = api_request("GET", f"/agent-config/org/{org_id}")
+    if resp.status_code == 200:
+        return resp.json()
+    return None
+
+
+def get_agent_config_via_internal_secret(org_id: str) -> dict | None:
+    """Fetch the agent config from the Business API using the M2M internal secret.
+
+    The user's access token (if present in the session) is forwarded too so the
+    API can record who triggered the request for audit. The internal secret is
+    the auth gate; the JWT is for observability.
+    """
+    secret = current_app.config.get("BUSINESS_API_INTERNAL_SECRET", "")
+    if not secret:
+        logger.debug(
+            "BUSINESS_API_INTERNAL_SECRET not configured; skipping M2M agent-config fetch for org=%s",
+            org_id,
+        )
+        return None
+    headers = {"X-Internal-Secret": secret}
+    resp = api_request("GET", f"/agent-config/org/{org_id}", headers=headers)
+    if resp.status_code == 200:
+        return resp.json()
+    return None
+
+
+def save_agent_config(data: dict) -> ApiResult:
+    return _parse_response(api_request("POST", "/agent-config", json=data))
+
+
+def delete_agent_config(org_id: str) -> ApiResult:
+    return _parse_response(api_request("DELETE", f"/agent-config/org/{org_id}"))
+
+
+def get_organization_plan(org_id: str, token: str = None) -> dict[str, Any]:
+    resp = api_request("GET", f"/plans/org/{org_id}", token=token)
+    if resp.status_code == 200:
+        return resp.json()
+    return {"org": org_id, "plan": "basic"}
+
+
+def save_organization_plan(org_id: str, plan_id: str, token: str = None) -> ApiResult:
+    return _parse_response(
+        api_request(
+            "POST",
+            "/plans",
+            token=token,
+            json={"org": org_id, "plan": plan_id},
+        )
+    )
+

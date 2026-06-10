@@ -1,0 +1,97 @@
+[project]
+name = "wso2-teamspace-demo"
+version = "0.1.0"
+description = "Teamspace B2B CIAM + Agentic AI demo with WSO2 Identity Server 7.2.0"
+readme = "README.md"
+license = "Apache-2.0"
+license-file = "LICENSE"
+authors = [
+    { name = "Vinicius Fraga", email = "sxvinifp@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "flask>=3.1",
+    "authlib>=1.7",
+    "requests>=2.31",
+    "python-dotenv>=1.2",
+    "flask-session>=0.8",
+    "fastapi>=0.136",
+    "uvicorn>=0.49",
+    "sqlalchemy>=2.0.50",
+    "pyjwt[crypto]>=2.13",
+    "httpx>=0.28",
+    "google-genai>=2.8",
+    "markdown>=3.10",
+    "mcp>=0.1.0",
+]
+
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=1.4",
+    "pytest-mock>=3.12",
+    "pytest-playwright>=0.8",
+    "ruff>=0.6",
+]
+test = [
+    "pytest>=9.0",
+    "pytest-asyncio>=1.4",
+    "pytest-mock>=3.12",
+    "pytest-playwright>=0.8",
+]
+
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "live: run live E2E integration tests against WSO2 IS",
+]
+
+
+# Ruff linter — narrow correctness-focused rule set.
+#
+# Why this set: catches "runtime-only" errors (undefined names, unused
+# imports, mutable default args, etc.) without drowning the team in
+# stylistic noise. Style rules (line length, whitespace, naming) are
+# intentionally OFF — pyproject.toml doesn't enforce them and the
+# existing code has accumulated stylistic drift that would dwarf the
+# real signal. Add rules as the team gains comfort, not on day 1.
+#
+# Rule families enabled:
+#   F    - pyflakes: undefined names, unused imports, syntax errors
+#   E9/F63/F7/F82 - pycodestyle correctness subset: real syntax problems
+#   B    - bugbear: common Python bugs (mutable defaults, identity checks)
+#
+# Run with: `ruff check .`
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [
+    ".venv",
+    "flask_session",
+    "__pycache__",
+    "scratch",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = [
+    "F",      # pyflakes (undefined name, unused import)
+    "E9",     # pycodestyle runtime errors (SyntaxError, IndentationError)
+    "F63",    # invalid-print-syntax, invalid-character
+    "F7",     # undefined name in `__all__`, if/while/etc. with invalid type
+    "F82",    # local variable referenced before assignment, etc.
+    "B",      # bugbear (likely bugs, not stylistic issues)
+]
+ignore = [
+    "B008",   # function call in default argument — common in Flask routes
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests are allowed to import in non-standard order, use unused fixtures, etc.
+"tests/**" = ["F401", "F811"]
+# setup_*.py provisioning scripts use subprocess + sys.exit liberally
+"setup_*.py" = ["E402"]

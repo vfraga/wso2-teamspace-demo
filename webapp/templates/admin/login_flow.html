@@ -1,0 +1,399 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t('login_flow_title') }} — Teamspace{% endblock %}
+
+{% block extra_head %}
+<style>
+    /* Premium visual layout for Steps Timeline */
+    .timeline-step {
+        display: flex;
+        gap: var(--space-4);
+        position: relative;
+    }
+    
+    .timeline-step::before {
+        content: '';
+        position: absolute;
+        top: 40px;
+        left: 20px;
+        bottom: -30px;
+        width: 2px;
+        background: var(--border);
+        z-index: 1;
+    }
+    
+    .timeline-step:last-child::before {
+        display: none;
+    }
+    
+    .step-number-node {
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        background: var(--card-bg);
+        border: 2px solid var(--org-primary, var(--primary));
+        color: var(--org-primary, var(--primary));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 1rem;
+        z-index: 2;
+        box-shadow: var(--shadow-sm);
+        flex-shrink: 0;
+    }
+    
+    .step-content-card {
+        flex: 1;
+        background: var(--card-bg);
+        border: 1.5px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: var(--space-5) var(--space-6);
+        box-shadow: var(--shadow-sm);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+    }
+    
+    .option-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-sm);
+        background: var(--border-light);
+        border: 1px solid var(--border);
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--text);
+        box-shadow: var(--shadow-xs);
+        transition: all var(--duration) var(--ease-out);
+    }
+    
+    .option-pill:hover {
+        border-color: var(--org-primary, var(--primary));
+        background: var(--card-bg-hover);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="login-flow-page">
+    <div class="page-header">
+        <div class="page-header-left">
+            <div style="display: flex; align-items: center; gap: var(--space-3);">
+                <a href="{{ url_for('admin.security', org_handle=org_handle) }}" class="btn btn-outline btn-xs" style="padding: 0.35rem 0.6rem; border-radius: var(--radius-sm);">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;">
+                        <line x1="19" y1="12" x2="5" y2="12"/>
+                        <polyline points="12 19 5 12 12 5"/>
+                    </svg>
+                </a>
+                <h1 style="margin: 0;">{{ _t('login_flow_title') }}</h1>
+            </div>
+            <p class="subtitle" style="margin-top: var(--space-2); margin-bottom: 0;">{{ _t('login_flow_desc') }}</p>
+        </div>
+    </div>
+
+    {% if api_debug %}
+    <details class="api-detail" style="margin-bottom: var(--space-6);">
+        <summary>API Details</summary>
+        <div class="api-detail-content">
+            {% with debug=api_debug %}
+            {% include "components/api_detail.html" %}
+            {% endwith %}
+        </div>
+    </details>
+    {% endif %}
+
+    <div class="flow-container" style="display: grid; grid-template-columns: 1fr 320px; gap: var(--space-8); align-items: start;">
+        
+        <!-- Interactive Steps Timeline -->
+        <div class="flow-steps-column" style="display: flex; flex-direction: column; gap: var(--space-6);">
+            
+            <div id="steps-list" style="display: flex; flex-direction: column; gap: var(--space-6); position: relative;">
+                <!-- Steps rendered here dynamically via JS -->
+            </div>
+            
+            <div class="timeline-add-step" style="padding-left: 56px;">
+                <button type="button" id="btn-add-step" class="btn btn-outline" style="border-style: dashed; border-width: 2px; width: 100%; justify-content: center; background: rgba(255,255,255,0.4);">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: var(--space-1);">
+                        <line x1="12" y1="5" x2="12" y2="19"/>
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                    {{ _t('login_flow_add_step') }}
+                </button>
+            </div>
+            
+            <div class="flow-actions" style="margin-top: var(--space-4); display: flex; gap: var(--space-4); padding-left: 56px;">
+                <form id="flow-form" method="POST" action="{{ url_for('admin.update_login_flow', org_handle=org_handle) }}">
+                    <input type="hidden" name="app_id" value="{{ app_id or '' }}">
+                    <input type="hidden" id="steps_json" name="steps_json" value="">
+                    <button type="submit" class="btn btn-primary" {% if not app_id %}disabled{% endif %}>
+                        {{ _t('login_flow_save') }}
+                    </button>
+                </form>
+                <button type="button" id="btn-reset" class="btn btn-outline" {% if not app_id %}disabled{% endif %}>
+                    {{ _t('login_flow_reset') }}
+                </button>
+            </div>
+            
+        </div>
+        
+        <!-- Legend / Available Authenticators Side Panel -->
+        <div class="authenticators-sidebar" style="background: var(--card-bg); border: 1.5px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-6); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);">
+            <h3 style="font-size: 1rem; font-weight: 700; margin-bottom: var(--space-4); border-bottom: 1.5px solid var(--border-light); padding-bottom: var(--space-2);">{{ _t('login_flow_ref_title') }}</h3>
+            
+            <div class="ref-section" style="margin-bottom: var(--space-5);">
+                <h4 style="font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: var(--space-2); letter-spacing: 0.05em;">{{ _t('login_flow_local_factors') }}</h4>
+                <div style="display: flex; flex-direction: column; gap: var(--space-2);">
+                    {% for auth in local_authenticators %}
+                    <div style="display: flex; align-items: center; gap: var(--space-2); font-size: 0.85rem;">
+                        <span class="badge" style="padding: 0.2rem 0.5rem; font-size: 0.65rem;">{{ _t('login_flow_local') | upper }}</span>
+                        <span style="font-weight: 500; color: var(--text);">{{ auth.displayName }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div class="ref-section">
+                <h4 style="font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: var(--space-2); letter-spacing: 0.05em;">{{ _t('login_flow_external_providers') }}</h4>
+                <div style="display: flex; flex-direction: column; gap: var(--space-2);">
+                    {% if idps %}
+                        {% for idp in idps %}
+                        <div style="display: flex; align-items: center; gap: var(--space-2); font-size: 0.85rem;">
+                            <span class="badge" style="padding: 0.2rem 0.5rem; font-size: 0.65rem; background: var(--warning-light); color: #92400E; border: 1px solid #FDE68A;">{{ _t('login_flow_federated') | upper }}</span>
+                            <span style="font-weight: 500; color: var(--text);">{{ idp.name }}</span>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <p style="font-size: 0.8rem; color: var(--text-muted); font-style: italic;">{{ _t('idp_no_connections') }}</p>
+                    {% endif %}
+            </div>
+        </div>
+        
+    </div>
+</div>
+
+
+<script>
+    document.addEventListener("DOMContentLoaded", () => {
+        // Translation constants
+        const tChooseAuth = "{{ _t('login_flow_choose_auth') }}";
+        const tLocalAuthOpt = "{{ _t('login_flow_local_auth_opt') }}";
+        const tFedAuthOpt = "{{ _t('login_flow_fed_auth_opt') }}";
+        const tDeleteStep = "{{ _t('login_flow_delete_step') }}";
+        const tAdd = "{{ _t('login_flow_add') }}";
+        const tStepTitle = "{{ _t('login_flow_step_title') }}";
+        const tLocal = "{{ _t('login_flow_local') }}";
+        const tFederated = "{{ _t('login_flow_federated') }}";
+
+        // Parse loaded configuration steps
+        let steps = {{ current_sequence.steps | tojson }};
+        
+        // Available choices definitions
+        const localAuthenticators = {{ local_authenticators | tojson }};
+        const idps = {{ idps | tojson }};
+        
+        const stepsListEl = document.getElementById("steps-list");
+        const stepsJsonInput = document.getElementById("steps_json");
+        const btnAddStep = document.getElementById("btn-add-step");
+        const btnReset = document.getElementById("btn-reset");
+        const flowForm = document.getElementById("flow-form");
+        
+        // Render the steps
+        function render() {
+            stepsListEl.innerHTML = "";
+            
+            steps.forEach((step, stepIndex) => {
+                const stepEl = document.createElement("div");
+                stepEl.className = "timeline-step";
+                
+                // Content Card
+                let optionsHtml = "";
+                step.options.forEach((opt, optIndex) => {
+                    const isLocal = opt.idp === "LOCAL";
+                    const badgeText = isLocal ? tLocal : tFederated;
+                    const badgeStyle = isLocal ? "" : "background: var(--warning-light); color: #92400E; border: 1px solid #FDE68A;";
+                    
+                    // Resolve Display Name
+                    let displayName = opt.authenticator;
+                    if (isLocal) {
+                        const match = localAuthenticators.find(a => a.name === opt.authenticator);
+                        if (match) displayName = match.displayName;
+                    } else {
+                        displayName = opt.idp;
+                    }
+                    
+                    // We shouldn't allow removing the last option of the only step
+                    const canRemove = !(steps.length === 1 && step.options.length === 1);
+                    
+                    optionsHtml += `
+                        <div class="option-pill">
+                            <span class="badge" style="padding: 0.15rem 0.4rem; font-size: 0.6rem; ${badgeStyle}">${badgeText}</span>
+                            <span>${displayName}</span>
+                            ${canRemove ? `
+                                <button type="button" class="btn-remove-opt" data-step-index="${stepIndex}" data-opt-index="${optIndex}" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 var(--space-1); display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; line-height: 1; transition: color var(--duration) var(--ease-out);">
+                                    <span style="font-weight: bold;">&times;</span>
+                                </button>
+                            ` : ''}
+                        </div>
+                    `;
+                });
+                
+                // Add Selector Dropdown Options
+                let selectOptionsHtml = `<option value="" disabled selected>${tChooseAuth}</option>`;
+                selectOptionsHtml += `<optgroup label="${tLocalAuthOpt}">`;
+                localAuthenticators.forEach(auth => {
+                    // Avoid adding duplicate local authenticators to the same step
+                    const exists = step.options.some(o => o.idp === "LOCAL" && o.authenticator === auth.name);
+                    if (!exists) {
+                        selectOptionsHtml += `<option value="LOCAL:${auth.name}">${auth.displayName} (${tLocal})</option>`;
+                    }
+                });
+                selectOptionsHtml += '</optgroup>';
+                
+                if (idps.length > 0) {
+                    selectOptionsHtml += `<optgroup label="${tFedAuthOpt}">`;
+                    idps.forEach(idp => {
+                        // Avoid duplicate IDPs in the same step
+                        const exists = step.options.some(o => o.idp === idp.name);
+                        if (!exists) {
+                            selectOptionsHtml += `<option value="FEDERATED:${idp.name}">${idp.name} (${tFederated})</option>`;
+                        }
+                    });
+                    selectOptionsHtml += '</optgroup>';
+                }
+                
+                // Controls for Step delete
+                const canDeleteStep = steps.length > 1;
+                const stepTitle = tStepTitle.replace("{number}", stepIndex + 1);
+                
+                stepEl.innerHTML = `
+                    <div class="step-number-node">${stepIndex + 1}</div>
+                    <div class="step-content-card">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
+                            <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text);">${stepTitle}</h3>
+                            ${canDeleteStep ? `
+                                <button type="button" class="btn-delete-step btn btn-danger btn-xs" data-step-index="${stepIndex}" style="padding: 0.25rem 0.5rem; font-size: 0.7rem; display: flex; align-items: center; gap: 4px;">
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="3 6 5 6 21 6"/>
+                                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                    </svg>
+                                    ${tDeleteStep}
+                                </button>
+                            ` : ''}
+                        </div>
+                        
+                        <div style="display: flex; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-4);">
+                            ${optionsHtml}
+                        </div>
+                        
+                        <div style="display: flex; gap: var(--space-2); align-items: center; max-width: 380px;">
+                            <select class="select-add-opt" style="padding: 0.45rem var(--space-3); font-size: 0.8rem;">
+                                ${selectOptionsHtml}
+                            </select>
+                            <button type="button" class="btn-add-opt btn btn-outline btn-xs" data-step-index="${stepIndex}" style="padding: 0.45rem var(--space-4); font-size: 0.8rem;">
+                                ${tAdd}
+                            </button>
+                        </div>
+                    </div>
+                `;
+                
+                stepsListEl.appendChild(stepEl);
+            });
+            
+            // Wire up event listeners dynamically
+            // Remove Option
+            document.querySelectorAll(".btn-remove-opt").forEach(btn => {
+                btn.addEventListener("click", (e) => {
+                    const stepIdx = parseInt(btn.getAttribute("data-step-index"));
+                    const optIdx = parseInt(btn.getAttribute("data-opt-index"));
+                    steps[stepIdx].options.splice(optIdx, 1);
+                    
+                    // If steps options become empty, remove the step entirely if possible
+                    if (steps[stepIdx].options.length === 0) {
+                        steps.splice(stepIdx, 1);
+                    }
+                    
+                    // Reindex remaining steps
+                    steps.forEach((s, idx) => {
+                        s.id = idx + 1;
+                    });
+                    
+                    render();
+                });
+            });
+            
+            // Delete Step
+            document.querySelectorAll(".btn-delete-step").forEach(btn => {
+                btn.addEventListener("click", () => {
+                    const stepIdx = parseInt(btn.getAttribute("data-step-index"));
+                    steps.splice(stepIdx, 1);
+                    
+                    // Reindex remaining steps
+                    steps.forEach((s, idx) => {
+                        s.id = idx + 1;
+                    });
+                    
+                    render();
+                });
+            });
+            
+            // Add Option
+            document.querySelectorAll(".btn-add-opt").forEach(btn => {
+                btn.addEventListener("click", () => {
+                    const stepIdx = parseInt(btn.getAttribute("data-step-index"));
+                    const select = btn.previousElementSibling;
+                    const val = select.value;
+                    if (!val) return;
+                    
+                    const [type, name] = val.split(":");
+                    if (type === "LOCAL") {
+                        steps[stepIdx].options.push({
+                            idp: "LOCAL",
+                            authenticator: name
+                        });
+                    } else if (type === "FEDERATED") {
+                        steps[stepIdx].options.push({
+                            idp: name,
+                            authenticator: "OpenIDConnectAuthenticator"
+                        });
+                    }
+                    
+                    render();
+                });
+            });
+            
+            // Update the hidden JSON field
+            stepsJsonInput.value = JSON.stringify(steps);
+        }
+        
+        // Add step handler
+        btnAddStep.addEventListener("click", () => {
+            const newStepId = steps.length + 1;
+            steps.push({
+                id: newStepId,
+                options: [
+                    { idp: "LOCAL", authenticator: "BasicAuthenticator" }
+                ]
+            });
+            render();
+        });
+        
+        // Reset to Default handler
+        btnReset.addEventListener("click", () => {
+            steps = [
+                {
+                    id: 1,
+                    options: [
+                        { idp: "LOCAL", authenticator: "BasicAuthenticator" }
+                    ]
+                }
+            ];
+            render();
+        });
+        
+        // Initialize
+        render();
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t('roles_title') }} — Teamspace{% endblock %}
+
+{% block extra_head %}
+<style>
+    .roles-page .role-list {
+        background: var(--card-bg);
+        border: 1.5px solid var(--border);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
+        margin-top: var(--space-6);
+    }
+    .roles-page .role-item {
+        border-bottom: 1.5px solid var(--border);
+        transition: all var(--duration) var(--ease-spring);
+    }
+    .roles-page .role-item:last-child {
+        border-bottom: none;
+    }
+    .roles-page .role-item-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+        padding: var(--space-5) var(--space-6);
+        cursor: pointer;
+        user-select: none;
+        background: var(--card-bg);
+        transition: background var(--duration) var(--ease-out);
+    }
+    .roles-page .role-item-header:hover {
+        background: var(--border-light);
+    }
+    .roles-page .role-item-header-left {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+    }
+    .roles-page .role-name {
+        font-size: 1.05rem;
+        font-weight: 800;
+        color: var(--text);
+        margin: 0;
+    }
+    .roles-page .badge-audience {
+        background: var(--border-light);
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
+        padding: 0.2rem 0.6rem;
+        border-radius: var(--radius-xs);
+        font-size: 0.725rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .roles-page .manage-panel {
+        padding: var(--space-6);
+        background: var(--border-light);
+        border-top: 1.5px solid var(--border);
+    }
+    .roles-page .manage-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: var(--space-4);
+    }
+    .roles-page .manage-panel-title {
+        font-size: 0.95rem;
+        font-weight: 800;
+        color: var(--text);
+        margin: 0;
+    }
+    .roles-page .user-checkboxes {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: var(--space-3);
+        max-height: 300px;
+        overflow-y: auto;
+        padding-right: var(--space-2);
+        margin-bottom: var(--space-4);
+    }
+    .roles-page .user-checkbox-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-3);
+        background: var(--card-bg);
+        border: 1.5px solid var(--border);
+        border-radius: var(--radius);
+        cursor: pointer;
+        transition: all var(--duration) var(--ease-out);
+    }
+    .roles-page .user-checkbox-row:hover {
+        border-color: var(--org-primary, var(--primary));
+        transform: translateY(-1px);
+    }
+    .roles-page .user-checkbox-row input[type="checkbox"] {
+        width: auto;
+        margin: 0;
+        accent-color: var(--org-primary, var(--primary));
+    }
+    .roles-page .user-checkbox-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+    }
+    .roles-page .user-checkbox-name {
+        font-size: 0.85rem;
+        font-weight: 700;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .roles-page .user-checkbox-email {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .roles-page .manage-panel-actions {
+        display: flex;
+        gap: var(--space-3);
+        padding-top: var(--space-4);
+        border-top: 1.5px solid var(--border);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="roles-page">
+    <div class="page-header">
+        <div class="page-header-left">
+            <h1>{{ _t('roles_title') }}</h1>
+            <p class="subtitle">{{ _t('card_roles_desc') }}</p>
+        </div>
+    </div>
+
+    {# --- API Details --- #}
+    {% if api_debug_list %}
+    <details class="api-detail">
+        <summary>API Details</summary>
+        <div class="api-detail-content" style="display: flex; flex-direction: column; gap: var(--space-4);">
+            {% for debug in api_debug_list %}
+            {% with debug=debug %}
+            {% include "components/api_detail.html" %}
+            {% endwith %}
+            {% endfor %}
+        </div>
+    </details>
+    {% endif %}
+
+    {# --- Role List --- #}
+    {% if roles %}
+    <div class="role-list">
+        {% for role in roles %}
+        <div class="role-item" id="role-{{ role.id }}" x-data="{ showEdit: false }">
+            {# List Item Header (Clickable Entry) #}
+            <div class="role-item-header" @click="showEdit = !showEdit">
+                <div class="role-item-header-left">
+                    <h3 class="role-name">{{ role.displayName }}</h3>
+                    {% if role.audience %}
+                    <span class="badge-audience">{{ role.audience.type | default('—') }}</span>
+                    {% endif %}
+                </div>
+                <div style="display: flex; align-items: center; gap: var(--space-2); color: var(--org-primary, var(--primary)); font-weight: 700; font-size: 0.85rem;">
+                    <span x-text="showEdit ? '{{ _t('roles_close') }}' : '{{ _t('roles_manage_members') }}'"></span>
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" :style="showEdit ? 'transform: rotate(180deg); transition: transform var(--duration) var(--ease-spring);' : 'transition: transform var(--duration) var(--ease-spring);'">
+                        <polyline points="6 9 12 15 18 9"/>
+                    </svg>
+                </div>
+            </div>
+
+            {# Edit Members Panel (Collapsible) #}
+            <div class="manage-panel" x-show="showEdit" x-transition style="display: none;" @click.away="showEdit = false">
+                <div class="manage-panel-header">
+                    <h4 class="manage-panel-title">{{ _t('roles_edit_members', role_name=role.displayName) }}</h4>
+                </div>
+
+                <form method="POST" action="{{ url_for('admin.update_role_members', org_handle=org_handle, role_id=role.id) }}" @click.stop>
+                    {% if all_users %}
+                    <div class="user-checkboxes">
+                        {% set assigned_ids = role.users | map(attribute='value') | list %}
+                        {% for user in all_users %}
+                        <label class="user-checkbox-row">
+                            <input type="checkbox"
+                                   name="user_ids"
+                                   value="{{ user.id }}"
+                                   {% if user.id in assigned_ids %}checked{% endif %}>
+                            <div class="user-checkbox-info">
+                                <span class="user-checkbox-name">
+                                    {{ user.name.givenName if user.name else '' }} {{ user.name.familyName if user.name else '' }}
+                                </span>
+                                <span class="user-checkbox-email">{{ user.userName }}</span>
+                            </div>
+                        </label>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="no-users-hint">{{ _t('roles_no_users_found') }}</p>
+                    {% endif %}
+
+                    <div class="manage-panel-actions">
+                        <button type="submit" class="btn btn-primary btn-sm">{{ _t('roles_save_members') }}</button>
+                        <button type="button" class="btn btn-outline btn-sm" @click="showEdit = false">{{ _t('roles_cancel') }}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">{{ _t('roles_empty_state') }}</p>
+    {% endif %}
+</div>
+{% endblock %}

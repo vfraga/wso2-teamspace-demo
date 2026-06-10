@@ -1,0 +1,37 @@
+{% with messages = get_flashed_messages() %}
+{% if messages %}
+<div class="flash-container">
+    {% for msg in messages %}
+    {% if msg is mapping %}
+    <div class="flash flash-{{ msg.type }}" x-data="{ show: true, showApi: false }" x-show="show">
+        <span>{{ msg.message }}</span>
+        {% if msg.api_debug %}
+        <button class="btn btn-xs" @click="showApi = !showApi">API Details</button>
+        <div x-show="showApi" x-cloak class="api-detail-inline" style="display: none;">
+            {% with debug=msg.api_debug %}
+            {% include "components/api_detail.html" %}
+            {% endwith %}
+        </div>
+        {% endif %}
+        {% if msg.api_debug_list %}
+        <button class="btn btn-xs" @click="showApi = !showApi">API Details</button>
+        <div x-cloak class="api-detail-inline" :style="showApi ? 'display: flex; flex-direction: column; gap: var(--space-4); margin-top: var(--space-3); padding: var(--space-3) 0 0; background: transparent; border: none;' : 'display: none;'">
+            {% for debug in msg.api_debug_list %}
+            {% with debug=debug %}
+            {% include "components/api_detail.html" %}
+            {% endwith %}
+            {% endfor %}
+        </div>
+        {% endif %}
+        <button class="flash-close" @click="show = false">&times;</button>
+    </div>
+    {% else %}
+    <div class="flash flash-info" x-data="{ show: true }" x-show="show">
+        <span>{{ msg }}</span>
+        <button class="flash-close" @click="show = false">&times;</button>
+    </div>
+    {% endif %}
+    {% endfor %}
+</div>
+{% endif %}
+{% endwith %}

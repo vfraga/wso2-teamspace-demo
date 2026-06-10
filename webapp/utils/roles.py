@@ -1,0 +1,5 @@
+TEAMSPACE_ADMIN = "teamspace-admin"
+TEAMSPACE_USER = "teamspace-user"
+BASIC_BRANDING_EDITOR = "basic-branding-editor"
+ADVANCED_BRANDING_EDITOR = "advanced-branding-editor"
+IDP_MANAGER = "idp-manager"

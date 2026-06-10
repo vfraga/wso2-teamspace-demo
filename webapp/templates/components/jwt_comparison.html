@@ -1,0 +1,75 @@
+<div class="jwt-comparison" style="margin: 0; display: flex; flex-direction: column; gap: var(--space-4);">
+    <div style="background: var(--org-secondary, var(--primary-glow)); border: 1px dashed var(--org-primary, var(--primary)); padding: var(--space-3) var(--space-4); border-radius: var(--radius); font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4; display: flex; align-items: flex-start; gap: 8px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink:0; margin-top:2px;"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg>
+        <span>
+            {{ _t('chat_obo_intro') | safe }}
+        </span>
+    </div>
+    
+    <div class="table-wrapper" style="border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm);">
+        <table class="jwt-table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.825rem; table-layout: fixed;">
+            <colgroup>
+                <col style="width: 13%;">
+                <col style="width: 29%;">
+                <col style="width: 29%;">
+                <col style="width: 29%;">
+            </colgroup>
+            <thead>
+                <tr style="background: var(--bg-warm); border-bottom: 1.5px solid var(--border);">
+                    <th style="width: 13%; padding: 10px 14px; font-weight: 700; color: var(--text-secondary); font-size: 0.725rem; text-transform: uppercase; letter-spacing: 0.05em;">{{ _t('chat_th_claim') }}</th>
+                    <th style="width: 29%; padding: 10px 14px; font-weight: 700; color: var(--text-secondary); font-size: 0.725rem; text-transform: uppercase; letter-spacing: 0.05em;">{{ _t('chat_th_user_token') }}</th>
+                    <th style="width: 29%; padding: 10px 14px; font-weight: 700; color: var(--text-secondary); font-size: 0.725rem; text-transform: uppercase; letter-spacing: 0.05em;">{{ _t('chat_th_obo_token') }}</th>
+                    <th style="width: 29%; padding: 10px 14px; font-weight: 700; color: var(--text-secondary); font-size: 0.725rem; text-transform: uppercase; letter-spacing: 0.05em;">{{ _t('chat_th_agent_token') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="border-bottom: 1px solid var(--border-light);">
+                    <td style="padding: 10px 14px; font-weight: 600;"><code style="color:var(--org-primary, var(--primary));">sub</code></td>
+                    <td style="padding: 10px 14px; color: var(--text-secondary); word-break: break-all; white-space: normal; overflow-wrap: anywhere;">{{ user_token.sub or '—' }}</td>
+                    <td style="padding: 10px 14px; color: var(--text-secondary); word-break: break-all; white-space: normal; overflow-wrap: anywhere;">{{ obo_token.sub or '—' }}</td>
+                    <td class="highlight" style="padding: 10px 14px; background: var(--org-secondary, var(--primary-glow)); color: var(--org-primary, var(--primary)); font-weight: 600; word-break: break-all; white-space: normal; overflow-wrap: anywhere;">{{ agent_token.sub or '—' }}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--border-light);">
+                    <td style="padding: 10px 14px; font-weight: 600;"><code style="color:var(--org-primary, var(--primary));">act</code></td>
+                    <td style="padding: 10px 14px; color: var(--text-muted);">—</td>
+                    <td style="padding: 10px 14px; word-break: break-all; white-space: normal; overflow-wrap: anywhere;">
+                        <span class="claim-highlight">{{ obo_token.act | tojson if obo_token.act else '—' }}</span>
+                    </td>
+                    <td style="padding: 10px 14px; color: var(--text-muted);">—</td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--border-light);">
+                    <td style="padding: 10px 14px; font-weight: 600;"><code style="color:var(--org-primary, var(--primary));">aut</code></td>
+                    <td style="padding: 10px 14px; color: var(--text-secondary);">{{ user_token.aut or 'APPLICATION_USER' }}</td>
+                    <td style="padding: 10px 14px; color: var(--text-secondary);">{{ obo_token.aut or 'APPLICATION_USER' }}</td>
+                    <td class="highlight" style="padding: 10px 14px; background: var(--org-secondary, var(--primary-glow)); color: var(--org-primary, var(--primary)); font-weight: 600;">{{ agent_token.aut or 'AGENT' }}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--border-light);">
+                    <td style="padding: 10px 14px; font-weight: 600;"><code style="color:var(--org-primary, var(--primary));">scope</code></td>
+                    <td style="padding: 10px 14px; color: var(--text-secondary); word-break: normal; word-wrap: break-word; overflow-wrap: break-word; white-space: normal;"><small>{{ user_token.scope or '—' }}</small></td>
+                    <td style="padding: 10px 14px; color: var(--text-secondary); word-break: normal; word-wrap: break-word; overflow-wrap: break-word; white-space: normal;"><small>{{ obo_token.scope or '—' }}</small></td>
+                    <td style="padding: 10px 14px; color: var(--text-secondary); word-break: normal; word-wrap: break-word; overflow-wrap: break-word; white-space: normal;"><small>{{ agent_token.scope or '—' }}</small></td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px 14px; font-weight: 600; color: var(--text-muted);">{{ _t('chat_auth_flow') }}</td>
+                    <td style="padding: 10px 14px; color: var(--text-secondary);">Authorization Code</td>
+                    <td style="padding: 10px 14px; color: var(--text-secondary); font-weight: 600;">OBO (RFC 8693)</td>
+                    <td style="padding: 10px 14px; color: var(--text-secondary);">Client Credentials</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Architectural Note: Segregation of Duties -->
+    <div class="architectural-note" style="background: var(--bg-warm); border-left: 4px solid var(--org-primary, var(--primary)); padding: var(--space-4); border-radius: 0 var(--radius) var(--radius) 0; font-size: 0.8rem; line-height: 1.5; color: var(--text-secondary); box-shadow: var(--shadow-sm); margin-top: var(--space-2);">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: var(--space-2); font-weight: 700; color: var(--text-primary); font-size: 0.85rem;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary));"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span>{{ _t('chat_arch_note_title') | safe }}</span>
+        </div>
+        <p style="margin: 0 0 var(--space-2) 0;">
+            {{ _t('chat_arch_note_p1') | safe }}
+        </p>
+        <p style="margin: 0;">
+            {{ _t('chat_arch_note_p2') | safe }}
+        </p>
+    </div>
+</div>

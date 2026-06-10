@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t('agents_deploy_title') }} — Teamspace{% endblock %}
+
+{% block content %}
+<div class="user-form-page">
+    <h1>{{ _t('agents_deploy_title') }}</h1>
+    <p class="subtitle">{{ _t('agents_deploy_desc') }}</p>
+
+    <form method="POST" action="{{ url_for('agents.add_agent', org_handle=org_handle) }}">
+        <label for="display_name">{{ _t('agents_name_label') }}</label>
+        <input type="text" id="display_name" name="display_name" required placeholder="{{ _t('agents_name_placeholder') }}">
+
+        <label for="description">{{ _t('agents_desc_label') }}</label>
+        <input type="text" id="description" name="description" placeholder="{{ _t('agents_desc_placeholder') }}">
+
+        <label for="gemini_api_key">{{ _t('agents_gemini_key') }}</label>
+        <input type="password" id="gemini_api_key" name="gemini_api_key" required placeholder="AIza...">
+        <small style="color: var(--text-secondary); display: block; margin-top: -0.5rem; margin-bottom: 1rem;">{{ _t('agents_gemini_key_desc') }} <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a>.</small>
+
+        <label for="custom_prompt">{{ _t('agents_custom_prompt_lbl') }} <span style="font-weight: normal; color: var(--text-secondary);">{{ _t('agents_optional') }}</span></label>
+        <textarea id="custom_prompt" name="custom_prompt" rows="6" placeholder="{{ _t('agents_custom_prompt_desc') }}"></textarea>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">{{ _t('agents_deploy_agent') }}</button>
+            <a href="{{ url_for('agents.list_agents', org_handle=org_handle) }}" class="btn btn-outline">{{ _t('users_cancel') }}</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

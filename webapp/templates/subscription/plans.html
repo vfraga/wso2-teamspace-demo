@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t('nav_subscription') }} — Teamspace{% endblock %}
+
+{% block content %}
+<div class="subscription-page">
+    <div class="page-header">
+        <div class="page-header-left">
+            <h1>{{ _t('subscription_plans_title') }}</h1>
+            <p class="subtitle">{{ _t('subscription_current_plan_info', current_plan=_t('plan_' + current_plan)) | safe }}</p>
+        </div>
+    </div>
+
+    <div class="plan-cards">
+        {% for plan in plans %}
+        <div class="plan-card {% if plan.id == current_plan %}current{% endif %}">
+            {% if plan.id == current_plan %}
+            <span class="plan-badge">{{ _t('plan_current') }}</span>
+            {% elif plan.id == 'business' %}
+            <span class="plan-badge">{{ _t('plan_popular') }}</span>
+            {% endif %}
+            <h3>{{ _t('plan_' + plan.id) }}</h3>
+            <p class="plan-price">{{ _t('price_' + plan.id) }}</p>
+            <ul>
+                {% for feature in plan.features %}
+                <li>
+                    {% if feature == "Manage Meetings" %}{{ _t('feature_manage_meetings') }}
+                    {% elif feature == "User Management" %}{{ _t('feature_user_management') }}
+                    {% elif feature == "Role Management" %}{{ _t('feature_role_management') }}
+                    {% elif feature == "Everything in Basic" %}{{ _t('feature_everything_in_basic') }}
+                    {% elif feature == "Basic Branding" %}{{ _t('feature_basic_branding') }}
+                    {% elif feature == "Custom Logo & Colors" %}{{ _t('feature_custom_logo_colors') }}
+                    {% elif feature == "Everything in Business" %}{{ _t('feature_everything_in_business') }}
+                    {% elif feature == "Advanced Branding" %}{{ _t('feature_advanced_branding') }}
+                    {% elif feature == "Federated IdP" %}{{ _t('feature_federated_idp') }}
+                    {% elif feature == "Security Settings" %}{{ _t('feature_security_settings') }}
+                    {% elif feature == "AI Agents" %}{{ _t('feature_ai_agents') }}
+                    {% else %}{{ feature }}
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% set plan_order = {'basic': 0, 'business': 1, 'enterprise': 2} %}
+            {% if plan.id == current_plan %}
+            <button class="btn btn-outline btn-block" disabled>{{ _t('plan_current') }}</button>
+            {% elif plan_order.get(plan.id, 0) > plan_order.get(current_plan, 0) %}
+            <form method="POST" action="{{ url_for('subscription.upgrade', org_handle=org_handle) }}">
+                <input type="hidden" name="plan" value="{{ plan.id }}">
+                <button type="submit" class="btn btn-primary btn-block">{{ _t('plan_upgrade_to', name=_t('plan_' + plan.id)) }}</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

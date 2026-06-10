@@ -1,0 +1,60 @@
+<div id="jwt-inspector-container" class="jwt-inspector-container" hx-swap-oob="true" x-show="open" style="display: flex;">
+    <div class="jwt-inspector" x-data="{ currentTab: 'comparison' }" style="display: flex; flex-direction: column; height: 100%; width: 100%;">
+        <div class="jwt-inspector-header" style="display: flex; justify-content: space-between; align-items: center; padding-bottom: var(--space-4); border-bottom: 1.5px solid var(--border-light); margin-bottom: var(--space-4);">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                {% if obo_jwt_raw %}
+                    <span class="badge" style="background: var(--success-light); color: var(--success); font-weight: 600; padding: 2px 8px; border-radius: var(--radius-sm); font-size: 0.75rem;">{{ _t('chat_obo_active') }}</span>
+                {% else %}
+                    <span class="badge" style="background: var(--warning-light); color: var(--warning); font-weight: 600; padding: 2px 8px; border-radius: var(--radius-sm); font-size: 0.75rem;">{{ _t('chat_obo_pending') }}</span>
+                {% endif %}
+                <h4 style="margin: 0; font-size: 0.95rem; font-weight: 700;">{{ _t('chat_token_inspector') }}</h4>
+            </div>
+            <button class="btn-close" onclick="document.getElementById('jwt-inspector-container').style.display = 'none'" style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--text-muted);">&times;</button>
+        </div>
+
+        <!-- Inspector Tabs -->
+        <div class="jwt-tabs" style="display: flex; gap: 4px; margin-bottom: var(--space-4);">
+            <button :class="{ 'active': currentTab === 'comparison' }" @click="currentTab = 'comparison'" style="flex: 1; text-align: center;">{{ _t('chat_tab_comparison') }}</button>
+            <button :class="{ 'active': currentTab === 'user' }" @click="currentTab = 'user'" style="flex: 1; text-align: center;">{{ _t('chat_tab_user') }}</button>
+            <button :class="{ 'active': currentTab === 'obo' }" @click="currentTab = 'obo'" style="flex: 1; text-align: center;">{{ _t('chat_tab_obo') }}</button>
+            <button :class="{ 'active': currentTab === 'agent' }" @click="currentTab = 'agent'" style="flex: 1; text-align: center;">{{ _t('chat_tab_agent') }}</button>
+        </div>
+
+        <!-- Tab Contents -->
+        <div x-show="currentTab === 'comparison'" style="flex: 1; overflow-y: auto;">
+            {% with user_token=user_token, obo_token=obo_token, agent_token=agent_token %}
+                {% include "components/jwt_comparison.html" %}
+            {% endwith %}
+        </div>
+
+        <div x-show="currentTab === 'user'" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column;">
+            <div style="background: var(--org-secondary, var(--primary-glow)); border: 1px dashed var(--org-primary, var(--primary)); padding: var(--space-3) var(--space-4); border-radius: var(--radius); font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4; display: flex; align-items: flex-start; gap: 8px; margin-bottom: var(--space-3);">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink:0; margin-top:2px;"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg>
+                <span>{{ _t('chat_user_desc') }}</span>
+            </div>
+            {% with jwt_data=user_jwt_data, jwt_raw=user_jwt_raw %}
+                {% include "components/jwt_viewer.html" %}
+            {% endwith %}
+        </div>
+
+        <div x-show="currentTab === 'obo'" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column;">
+            <div style="background: var(--org-secondary, var(--primary-glow)); border: 1px dashed var(--org-primary, var(--primary)); padding: var(--space-3) var(--space-4); border-radius: var(--radius); font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4; display: flex; align-items: flex-start; gap: 8px; margin-bottom: var(--space-3);">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink:0; margin-top:2px;"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg>
+                <span>{{ _t('chat_obo_desc') }}</span>
+            </div>
+            {% with jwt_data=obo_jwt_data, jwt_raw=obo_jwt_raw %}
+                {% include "components/jwt_viewer.html" %}
+            {% endwith %}
+        </div>
+
+        <div x-show="currentTab === 'agent'" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column;">
+            <div style="background: var(--org-secondary, var(--primary-glow)); border: 1px dashed var(--org-primary, var(--primary)); padding: var(--space-3) var(--space-4); border-radius: var(--radius); font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4; display: flex; align-items: flex-start; gap: 8px; margin-bottom: var(--space-3);">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--org-primary, var(--primary)); flex-shrink:0; margin-top:2px;"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg>
+                <span>{{ _t('chat_agent_desc') }}</span>
+            </div>
+            {% with jwt_data=agent_jwt_data, jwt_raw=agent_jwt_raw %}
+                {% include "components/jwt_viewer.html" %}
+            {% endwith %}
+        </div>
+    </div>
+</div>

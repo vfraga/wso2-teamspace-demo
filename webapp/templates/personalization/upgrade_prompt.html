@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t('card_personalization_title') }} — Teamspace{% endblock %}
+
+{% block content %}
+<div class="upgrade-page">
+    <div class="page-header">
+        <div class="page-header-left">
+            <h1>{{ _t('card_personalization_title') }}</h1>
+            <p class="subtitle">{{ _t('card_personalization_desc') }}</p>
+        </div>
+    </div>
+
+    <div class="upgrade-prompt">
+        <div class="upgrade-lock">
+            <h2>{{ _t('badge_upgrade_required') }}</h2>
+            <p>{{ _t('upgrade_prompt_desc') }}</p>
+        </div>
+
+        <div class="plan-cards">
+            <div class="plan-card">
+                <h3>{{ _t('plan_business') }}</h3>
+                <p class="plan-price">{{ _t('price_business') | replace(_t('plan_price_period'), '') }}<small>{{ _t('plan_price_period') }}</small></p>
+                <ul>
+                    <li>{{ _t('feature_custom_logo_colors') }}</li>
+                    <li>{{ _t('feature_basic_branding') }}</li>
+                </ul>
+                <form method="POST" action="{{ url_for('subscription.upgrade', org_handle=org_handle) }}">
+                    <input type="hidden" name="plan" value="business">
+                    <button type="submit" class="btn btn-primary btn-block">{{ _t('plan_upgrade_now') }}</button>
+                </form>
+            </div>
+
+            <div class="plan-card">
+                <h3>{{ _t('plan_enterprise') }}</h3>
+                <p class="plan-price">{{ _t('price_enterprise') | replace(_t('plan_price_period'), '') }}<small>{{ _t('plan_price_period') }}</small></p>
+                <ul>
+                    <li>{{ _t('feature_everything_in_business') }}</li>
+                    <li>{{ _t('feature_advanced_branding_favicon') }}</li>
+                    <li>{{ _t('feature_federated_idp') }}</li>
+                    <li>{{ _t('feature_ai_agents') }}</li>
+                </ul>
+                <form method="POST" action="{{ url_for('subscription.upgrade', org_handle=org_handle) }}">
+                    <input type="hidden" name="plan" value="enterprise">
+                    <button type="submit" class="btn btn-primary btn-block">{{ _t('plan_upgrade_now') }}</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
