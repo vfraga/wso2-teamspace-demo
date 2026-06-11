@@ -36,11 +36,12 @@ class CommonDefaults:
     BUSINESS_API_URL = "http://localhost:9091"
     AGENT_SERVICE_URL = "http://localhost:8000"
     AGENT_REDIRECT_URI = "http://localhost:8000/callback"
-    DEFAULT_LOGO_URL = (
-        "https://cdn.jsdelivr.net/gh/viniciusf/wso2-b2b-demo@main/"
-        "webapp/static/img/teamspace-logo.svg"
+    # Base URL for the project's demo image assets on the jsDelivr CDN. The
+    # Teamspace logo/favicon defaults below and the setup scripts all derive
+    # their asset URLs from this single source.
+    CDN_IMG_BASE_URL = (
+        "https://cdn.jsdelivr.net/gh/vfraga/wso2-teamspace-demo@main/"
+        "webapp/static/img"
     )
-    DEFAULT_FAVICON_URL = (
-        "https://cdn.jsdelivr.net/gh/viniciusf/wso2-b2b-demo@main/"
-        "webapp/static/img/teamspace-favicon.svg"
-    )
+    DEFAULT_LOGO_URL = f"{CDN_IMG_BASE_URL}/teamspace-logo.svg"
+    DEFAULT_FAVICON_URL = f"{CDN_IMG_BASE_URL}/teamspace-favicon.svg"

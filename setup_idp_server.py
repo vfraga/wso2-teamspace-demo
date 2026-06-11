@@ -14,6 +14,9 @@ import stat
 import requests
 import urllib3
 
+from common.config import CommonDefaults
+from webapp.is_operations import build_is_branding_payload
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ─── Configuration ───────────────────────────────────────────────────────────
@@ -37,6 +40,15 @@ FEDERATED_USER_PASSWORD = os.environ.get("FEDERATED_USER_PASSWORD", "")
 SERVER_API = f"{BASE_URL}/api/server/v1"
 TENANT_API = f"{BASE_URL}/t/{TENANT_DOMAIN}/api/server/v1"
 TENANT_SCIM = f"{BASE_URL}/t/{TENANT_DOMAIN}/scim2"
+
+# ─── Branding (Worklink IdP login page) ──────────────────────────────────────
+# The federated IdP's hosted login page uses its own Worklink IdP assets so the
+# SSO redirect is visibly a distinct, branded identity provider.
+CDN_IMG_BASE_URL = os.getenv("CDN_IMG_BASE_URL", CommonDefaults.CDN_IMG_BASE_URL)
+WORKLINK_IDP_LOGO_URL = os.getenv("WORKLINK_IDP_LOGO_URL", f"{CDN_IMG_BASE_URL}/worklink-idp-logo.svg")
+WORKLINK_IDP_FAVICON_URL = os.getenv("WORKLINK_IDP_FAVICON_URL", f"{CDN_IMG_BASE_URL}/worklink-idp-favicon.svg")
+WORKLINK_IDP_PRIMARY_COLOR = os.getenv("WORKLINK_IDP_PRIMARY_COLOR", "#155E75")
+WORKLINK_IDP_SECONDARY_COLOR = os.getenv("WORKLINK_IDP_SECONDARY_COLOR", "#D7EEF5")
 
 
 def _session():
@@ -69,6 +81,29 @@ def _bootstrap_tenant(s):
         print(f"Failed to create tenant: {resp.text}")
         raise RuntimeError("federated IdP bootstrap failed")
     print("Tenant created.")
+
+
+def _bootstrap_branding(s):
+    print("Setting Worklink IdP branding (logo, favicon, colors)...")
+    payload = build_is_branding_payload({
+        "primary_color": WORKLINK_IDP_PRIMARY_COLOR,
+        "secondary_color": WORKLINK_IDP_SECONDARY_COLOR,
+        "logo_url": WORKLINK_IDP_LOGO_URL,
+        "logo_alt_text": "Worklink IdP",
+        "favicon_url": WORKLINK_IDP_FAVICON_URL,
+    }, org_name="Worklink")
+    payload["name"] = TENANT_DOMAIN
+    resp = s.post(f"{TENANT_API}/branding-preference", auth=TENANT_ADMIN_AUTH, json=payload)
+    if _ok(resp):
+        print("Branding set.")
+    elif resp.status_code == 409:
+        resp = s.put(f"{TENANT_API}/branding-preference", auth=TENANT_ADMIN_AUTH, json=payload)
+        if _ok(resp):
+            print("Branding updated (already existed).")
+        else:
+            print(f"Branding update failed: {resp.status_code} — {resp.text[:200]}")
+    else:
+        print(f"Branding response: {resp.status_code} — {resp.text[:200]}")
 
 
 def _bootstrap_groups_scope(s):
@@ -318,6 +353,7 @@ def bootstrap_federated_idp():
     print("Connecting to second IS instance at 9444...")
 
     _bootstrap_tenant(s)
+    _bootstrap_branding(s)
     _bootstrap_groups_scope(s)
     app_id = _bootstrap_application(s)
     _bootstrap_application_claims_and_oidc(s, app_id)

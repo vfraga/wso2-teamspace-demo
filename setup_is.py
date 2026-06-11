@@ -19,6 +19,7 @@ import sys
 import requests
 from dotenv import load_dotenv
 from webapp.is_client import ISClient
+from common.config import CommonDefaults
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -59,8 +60,9 @@ TENANT_SCIM = f"{BASE_URL}/t/{TENANT_DOMAIN}/scim2/v2"
 SUPER_ADMIN_AUTH = (SUPER_ADMIN_USERNAME, SUPER_ADMIN_PASSWORD)
 TENANT_ADMIN_AUTH = (f"{TENANT_ADMIN_USERNAME}@{TENANT_DOMAIN}", TENANT_ADMIN_PASSWORD)
 
-DEFAULT_LOGO_URL = os.getenv("DEFAULT_LOGO_URL", "https://cdn.jsdelivr.net/gh/viniciusf/wso2-b2b-demo@main/webapp/static/img/teamspace-logo.svg")
-DEFAULT_FAVICON_URL = os.getenv("DEFAULT_FAVICON_URL", "https://cdn.jsdelivr.net/gh/viniciusf/wso2-b2b-demo@main/webapp/static/img/teamspace-favicon.svg")
+CDN_IMG_BASE_URL = os.getenv("CDN_IMG_BASE_URL", CommonDefaults.CDN_IMG_BASE_URL)
+DEFAULT_LOGO_URL = os.getenv("DEFAULT_LOGO_URL", f"{CDN_IMG_BASE_URL}/teamspace-logo.svg")
+DEFAULT_FAVICON_URL = os.getenv("DEFAULT_FAVICON_URL", f"{CDN_IMG_BASE_URL}/teamspace-favicon.svg")
 
 from webapp.is_operations import build_is_branding_payload
 
