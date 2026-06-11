@@ -5,7 +5,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from webapp.utils.decorators import login_required, admin_required
 from webapp.auth import get_client_credentials_token, switch_org_token
 from webapp.is_client import ISClient
-from webapp.is_operations import share_app_with_roles, assign_roles_to_user
+from webapp.is_operations import share_roles_with_org, assign_roles_to_user
 from webapp.api_proxy import get_organization_plan, save_organization_plan
 from webapp.plans import PLANS
 
@@ -50,7 +50,10 @@ def upgrade(org_handle):
     tenant_path = current_app.config.get("TENANT_PATH", "")
     api_debug_list = []
 
-    share_app_with_roles(is_client, root_token, tenant_path, plan["roles_shared"], api_debug_list)
+    # Share only this plan's extra roles, and only with THIS org — never
+    # share-with-all, which would re-apply role sharing to every org. The base
+    # teamspace-admin/teamspace-user roles are already shared org-wide by setup.
+    share_roles_with_org(is_client, root_token, tenant_path, org_id, plan["upgrade_roles"], api_debug_list)
 
     sub_org_token = switch_org_token(org_id, root_token)
     if sub_org_token:

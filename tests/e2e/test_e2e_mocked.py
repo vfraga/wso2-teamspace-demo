@@ -270,6 +270,11 @@ def create_organization(tenant: str = None):
 def share_application(tenant: str = None):
     return FastApiResponse(status_code=204)
 
+@mock_is.patch("/api/server/v1/applications/share")
+@mock_is.patch("/t/{tenant}/api/server/v1/applications/share")
+def share_application_with_org(tenant: str = None):
+    return FastApiResponse(status_code=204)
+
 @mock_is.post("/o/scim2/Users")
 @mock_is.post("/t/{tenant}/o/scim2/Users")
 def create_user(tenant: str = None):

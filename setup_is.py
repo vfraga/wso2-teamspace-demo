@@ -548,7 +548,11 @@ def create_roles(s, app_id):
 
 
 def share_with_roles(s, app_id):
-    step(11, "Share application with role sharing")
+    step(11, "Share base roles with all organizations")
+    # share-with-all is used ONLY here (setup), and ONLY for the universal base
+    # roles every org needs. Plan-specific roles (idp-manager, branding editors)
+    # are shared per-org at signup/upgrade via the applications/share API, so
+    # that re-sharing one org never clobbers another org's roles.
     resp = s.post(f"{TENANT_API}/applications/share-with-all", auth=TENANT_ADMIN_AUTH, json={
         "applicationId": app_id,
         "policy": "ALL_EXISTING_AND_FUTURE_ORGS",
@@ -557,9 +561,6 @@ def share_with_roles(s, app_id):
             "roles": [
                 {"audience": {"display": APP_NAME, "type": "application"}, "displayName": ROLE_NAMES["admin"]},
                 {"audience": {"display": APP_NAME, "type": "application"}, "displayName": ROLE_NAMES["user"]},
-                {"audience": {"display": APP_NAME, "type": "application"}, "displayName": ROLE_NAMES["idp_manager"]},
-                {"audience": {"display": APP_NAME, "type": "application"}, "displayName": ROLE_NAMES["basic_branding"]},
-                {"audience": {"display": APP_NAME, "type": "application"}, "displayName": ROLE_NAMES["advanced_branding"]},
             ],
         },
     })

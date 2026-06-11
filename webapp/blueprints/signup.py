@@ -5,7 +5,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 
 from webapp.auth import get_client_credentials_token, switch_org_token
 from webapp.is_client import ISClient
-from webapp.is_operations import share_app_with_roles, assign_roles_to_user
+from webapp.is_operations import share_roles_with_org, assign_roles_to_user
 from webapp.utils.helpers import slugify
 from webapp.utils.roles import TEAMSPACE_ADMIN, TEAMSPACE_USER
 from webapp.plans import PLAN_ROLES
@@ -147,9 +147,11 @@ def register():
     logger.info("Organization created: id=%s, handle=%s, name=%s", new_org_id, org_handle, org_name)
     api_debug_list = [result["debug"]]
 
-    all_roles = [TEAMSPACE_ADMIN, TEAMSPACE_USER] + PLAN_ROLES.get(selected_plan, [])
-    share_app_with_roles(is_client, root_token, tenant_path, all_roles, api_debug_list)
     extra_roles = PLAN_ROLES.get(selected_plan, [])
+    # Base teamspace-admin/teamspace-user roles are shared with every org by the
+    # setup script's share-with-all. Here we share only this plan's extra roles,
+    # and only with the new org, so pre-existing organizations are never touched.
+    share_roles_with_org(is_client, root_token, tenant_path, new_org_id, extra_roles, api_debug_list)
 
     sub_org_token = switch_org_token(new_org_id, root_token)
     if not sub_org_token:

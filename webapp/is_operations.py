@@ -96,30 +96,49 @@ def assign_roles_to_user(is_client: ISClient, token: str, tenant_path: str,
 
 
 
-def share_app_with_roles(is_client: ISClient, root_token: str,
-                         tenant_path: str, role_names: list[str],
+def share_roles_with_org(is_client: ISClient, root_token: str,
+                         tenant_path: str, org_id: str, role_names: list[str],
                          debug_list: list[dict]) -> None:
+    """Share specific application roles with a SINGLE sub-organization.
+
+    Uses the per-org ``applications/share`` PATCH API so only the target org's
+    shared roles are modified. The ``share-with-all`` API (used solely by the
+    setup scripts to establish the baseline) re-applies role sharing to ALL
+    existing and future orgs, which would clobber the roles of pre-existing
+    organizations — that is the bug this function avoids for signups/upgrades.
+
+    The base ``teamspace-admin`` / ``teamspace-user`` roles are already shared
+    with every org by the setup script, so callers pass only the plan-specific
+    extra roles here. Role sharing is asynchronous: callers must poll for the
+    role to appear in the sub-org (see :func:`poll_for_role_id`) before assigning
+    it to a user.
+    """
+    if not role_names:
+        return
     app_name = current_app.config.get("APP_NAME", "Teamspace")
     app_id = current_app.config.get("APP_ID", "")
-    
+
     roles_value = [
         {"displayName": name, "audience": {"display": app_name, "type": "application"}}
         for name in role_names
     ]
     result = is_client.call(
-        "POST",
-        f"{tenant_path}/api/server/v1/applications/share-with-all",
+        "PATCH",
+        f"{tenant_path}/api/server/v1/applications/share",
         root_token,
         json={
             "applicationId": app_id,
-            "policy": "ALL_EXISTING_AND_FUTURE_ORGS",
-            "roleSharing": {"mode": "SELECTED", "roles": roles_value},
+            "Operations": [{
+                "op": "add",
+                "path": f'organizations[orgId eq "{org_id}"].roles',
+                "value": roles_value,
+            }],
         },
     )
     if result["status_code"] in (200, 201, 202, 204):
-        logger.info("Shared app with roles %s via share-with-all", role_names)
+        logger.info("Shared roles %s with org %s", role_names, org_id)
     else:
-        logger.warning("share-with-all returned %s: %s", result["status_code"], result["data"])
+        logger.warning("share (org=%s) returned %s: %s", org_id, result["status_code"], result["data"])
     debug_list.append(result["debug"])
 
 
