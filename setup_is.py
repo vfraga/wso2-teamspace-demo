@@ -165,7 +165,7 @@ def create_application(s):
     resp = s.post(f"{TENANT_API}/applications", auth=TENANT_ADMIN_AUTH, json={
         "name": APP_NAME,
         "advancedConfigurations": {
-            "discoverableByEndUsers": False, "skipLogoutConsent": True, "skipLoginConsent": True,
+            "discoverableByEndUsers": False, "skipLogoutConsent": True, "skipLoginConsent": False,
         },
         "authenticationSequence": {
             "type": "DEFAULT",
