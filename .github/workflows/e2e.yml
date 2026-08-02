@@ -1,0 +1,52 @@
+# Browser-driven E2E, run on demand only.
+#
+# tests/e2e/test_e2e_mocked.py is hermetic — it stands up a mock WSO2 IS
+# (FastAPI) alongside the real Business API, AI Agent and Flask portal on
+# loopback ports and drives them with Playwright, so it needs no WSO2
+# install and no Gemini key. It is not wired into ci.yml because three of
+# its eight cases currently fail against the app as it stands:
+#
+#   test_complete_e2e_meeting_booking_flow
+#   test_list_update_delete_meeting_flow   - the mock IS issues tokens with
+#       iss=http://127.0.0.1:9444/t/teamspace while api/auth.py validates
+#       against "<IS_BASE_URL><TENANT_PATH>/oauth2/token", so the Business
+#       API rejects every bearer token and the chat panel never renders.
+#   test_idp_upgrade_prompt_for_non_enterprise_user - the AI Agents admin
+#       page no longer renders the .upgrade-lock block for a non-enterprise
+#       plan, so the last assertion of the test finds nothing.
+#
+# Both reproduce locally on 3.10, 3.12 and 3.14 and are unrelated to CI.
+# Once they are fixed this job should move into ci.yml.
+#
+# The remaining tests/e2e files are marked `live` and are excluded here:
+# they clone and boot two real WSO2 IS 7.2.0 instances from
+# WSO2_IS_TEMPLATE_PATH, which a hosted runner has no copy of.
+
+name: E2E (browser)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: playwright
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev --python 3.12
+
+      - name: Install Playwright browser
+        run: uv run --frozen playwright install --with-deps chromium
+
+      - name: Run mocked E2E suite
+        run: uv run --frozen pytest tests/e2e -m "not live" -v

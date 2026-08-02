@@ -1,5 +1,7 @@
 # Teamspace 🚀
 
+[![CI](https://github.com/vfraga/wso2-teamspace-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/vfraga/wso2-teamspace-demo/actions/workflows/ci.yml)
+
 > **Enterprise B2B CIAM & Agentic AI Identity Demonstration Portal**
 >
 > A demonstration application highlighting **WSO2 Identity Server 7.2.0**'s advanced B2B CIAM (Customer Identity & Access Management) capabilities blended with **Agentic AI Identity (On-Behalf-Of Delegation)** workflows.
@@ -432,6 +434,12 @@ Ruff is configured (in `pyproject.toml`) with a narrow, correctness-focused rule
 ```bash
 ruff check .
 ```
+
+### Continuous Integration
+
+`.github/workflows/ci.yml` runs on every push and pull request against `main`: `ruff check .`, then the unit and integration suites (138 tests) on Python 3.10 and 3.12. Both are hermetic — no WSO2 IS, no Gemini key, no browser. Dependencies are installed from the lockfile with `uv sync --frozen --extra dev`.
+
+The browser-driven suite lives in `.github/workflows/e2e.yml` and is `workflow_dispatch` only. It runs the mocked Playwright scenarios (`tests/e2e/test_e2e_mocked.py`), which are self-contained but currently have three failing cases; the header comment in that workflow records what each one is. The `live` tests stay out of CI entirely — a hosted runner has no WSO2 IS install to clone.
 
 ---
 

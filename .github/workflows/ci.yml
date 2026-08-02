@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev --python 3.12
+
+      # Only `ruff check`. The rule set in pyproject.toml is deliberately
+      # correctness-only (F, E9, F63, F7, F82, B) and the codebase is not
+      # formatted with `ruff format`, so `ruff format --check` is not run.
+      - name: Lint
+        run: uv run --frozen ruff check .
+
+  test:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the floor declared in pyproject.toml; 3.12 is the version
+        # the README recommends for local development.
+        python-version: ["3.10", "3.12"]
+    env:
+      # The services read their configuration from the environment at import
+      # time (see common/config.py). CI has no .env, so supply a deterministic
+      # dummy value: tests/unit/test_jwt_validation.py derives the audience it
+      # signs tokens with from api.config.settings.CLIENT_ID, and the JWT
+      # audience check fails if that is empty. No real credentials are needed.
+      CLIENT_ID: ci-client-id
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev --python ${{ matrix.python-version }}
+
+      # Unit and integration tests only. They are hermetic: no WSO2 Identity
+      # Server, no Gemini API key, no browser. The `live` marker covers the
+      # E2E tests that boot two real WSO2 IS instances from a local install
+      # (WSO2_IS_TEMPLATE_PATH) — those cannot run on a hosted runner. The
+      # browser-driven tests under tests/e2e/ are handled by e2e.yml.
+      - name: Run unit and integration tests
+        run: uv run --frozen pytest tests/unit tests/integration -m "not live" -v
