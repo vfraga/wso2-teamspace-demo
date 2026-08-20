@@ -131,37 +131,40 @@ key or an administrator account. Teamspace uses RFC 8693 OAuth 2.0 Token Exchang
 instead, so delegation is scoped to a single action, time-bound, and attributable
 to both the agent and the user who approved it.
 
-```
-┌──────┐             ┌──────────┐             ┌─────────────┐             ┌─────────┐
-│ User │             │ AI Agent │             │  WSO2 IS    │             │ Biz API │
-└──┬───┘             └────┬─────┘             └──────┬──────┘             └────┬────┘
-   │                      │                          │                         │
-   │ 1. "Schedule meeting"│                          │                         │
-   ├─────────────────────>│                          │                         │
-   │                      │ 2. Check OBO Token       │                         │
-   │                      ├──┐                       │                         │
-   │                      │  │ (None exists/expired) │                         │
-   │                      │<─┘                       │                         │
-   │ 3. Consent URL       │                          │                         │
-   │<─────────────────────┤                          │                         │
-   │                      │                          │                         │
-   │ 4. Authenticate & Consent                       │                         │
-   ├────────────────────────────────────────────────>│                         │
-   │                      │                          │                         │
-   │                      │ 5. Auth Code / User Token│                         │
-   │                      │<─────────────────────────┤                         │
-   │                      │                          │                         │
-   │                      │ 6. Exchange for OBO Token│                         │
-   │                      ├─────────────────────────>│                         │
-   │                      │  (RFC 8693 token exchange)                         │
-   │                      │                          │                         │
-   │                      │ 7. OBO JWT Token Issued  │                         │
-   │                      │<─────────────────────────┤                         │
-   │                      │                          │                         │
-   │                      │ 8. Create Meeting (with OBO Token)                 │
-   │                      ├───────────────────────────────────────────────────>│
-   │                      │                          │                         │ (Authorized!)
-   │                      │                          │                         │<───────────
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Portal as Flask Portal
+    participant Agent as AI Agent
+    participant WSO2 as WSO2 IS
+    participant API as Business API
+
+    User->>Portal: "Schedule a meeting tomorrow at 2 PM"
+    Portal->>Agent: POST /chat with a service token
+    Agent->>Agent: No valid delegated token for this thread
+    Agent-->>Portal: Reply containing an authorization link
+    Portal-->>User: Render the link in the chat panel
+
+    User->>Agent: GET /authorize in a popup
+    Agent->>Agent: Sign the state JWT, set the oauth_session cookie
+    Agent-->>User: Redirect to the WSO2 authorize endpoint
+    User->>WSO2: Authenticate and consent
+    WSO2-->>Agent: Redirect to /callback with code and state
+
+    Agent->>Agent: Verify the state signature, its expiry and the CSRF cookie
+    Agent->>WSO2: Authenticate as the organization's SCIM agent
+    WSO2-->>Agent: Agent access token, used as the actor_token
+    Agent->>WSO2: Exchange the code together with the actor_token
+    WSO2-->>Agent: Delegated token, sub is the user and act.sub is the agent
+    Agent-->>User: Close the popup and notify the opener
+
+    Portal->>Agent: POST /chat to resume the request
+    Agent->>API: POST /meetings with the delegated token
+    API->>API: Verify RS256 against JWKS, then scope and org claim
+    API-->>Agent: 201 Created
+    Agent-->>Portal: Meeting scheduled
+    Portal-->>User: Confirmation
 ```
 
 ### CSRF and replay protection
