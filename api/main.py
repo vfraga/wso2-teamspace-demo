@@ -10,7 +10,7 @@ from sqlalchemy.exc import OperationalError
 from common.logging_setup import configure_logging, is_production
 from common.m2m_auth import SERVICE_AUTH_HEADER
 from api.config import settings
-from api.database import engine, get_engine
+from api.database import get_engine
 from api.models import Base
 from api.routers import meetings, personalization, agent_configs, plans
 
@@ -42,7 +42,7 @@ def _ensure_schema() -> None:
     worker and take the whole master down with it.
     """
     try:
-        Base.metadata.create_all(bind=engine)
+        Base.metadata.create_all(bind=get_engine())
     except OperationalError as exc:
         if "already exists" not in str(exc).lower():
             raise

@@ -100,28 +100,32 @@ def get_sessionmaker() -> sessionmaker:
     return Database.sessionmaker()
 
 
-class EngineProxy:
-    def __getattr__(self, name):
-        return getattr(get_engine(), name)
+# `engine` and `SessionLocal` used to be hand-rolled proxy objects so they could
+# be imported before DATABASE_URL was known. The proxy for `engine` was a
+# footgun: it forwarded attribute access, so `MetaData.create_all(bind=proxy)`
+# worked, but it was not an `Engine` instance — and SQLAlchemy checks
+# `isinstance(bind, Engine)`. Binding a Session to it took a different path in
+# which each statement acquired its own connection, so the second write in a
+# transaction failed with "database is locked" on SQLite. That surfaced as
+# flaky, environment-dependent E2E failures rather than as an obvious error.
+#
+# PEP 562 module-level __getattr__ keeps the same lazy-import ergonomics while
+# handing out the real objects, so no caller can get it wrong.
+_LAZY_ATTRS = {
+    "engine": get_engine,
+    "SessionLocal": get_sessionmaker,
+}
 
-    def __repr__(self):
-        return repr(get_engine())
 
-
-class SessionLocalProxy:
-    def __call__(self, *args, **kwargs):
-        return get_sessionmaker()(*args, **kwargs)
-
-    def __getattr__(self, name):
-        return getattr(get_sessionmaker(), name)
-
-
-engine = EngineProxy()
-SessionLocal = SessionLocalProxy()
+def __getattr__(name: str):
+    factory = _LAZY_ATTRS.get(name)
+    if factory is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return factory()
 
 
 def get_db():
-    db = SessionLocal()
+    db = get_sessionmaker()()
     try:
         yield db
     except Exception:

@@ -49,7 +49,7 @@ e_str = int_to_base64url(numbers.e)
 # Import our actual apps and settings
 from api.main import app as api_app
 from api.config import settings as api_settings
-from api.database import engine as api_engine
+from api.database import get_engine as _get_api_engine
 from api.models import Base as ApiBase
 
 from agent.main import app as agent_app
@@ -542,10 +542,12 @@ async def mock_run_agent_stream(message: str, thread_id: str, org_name: str, his
 def run_isolated_servers():
     # Configure Business API
     test_db = "test_e2e.db"
-    if os.path.exists(test_db):
+    # WAL mode also creates -wal and -shm sidecars; removing only the main file
+    # leaves uncheckpointed state behind for the next run.
+    for _suffix in ("", "-wal", "-shm"):
         try:
-            os.remove(test_db)
-        except Exception:
+            os.remove(test_db + _suffix)
+        except OSError:
             pass
             
     api_settings.CLIENT_ID = E2E_CLIENT_ID
@@ -600,6 +602,7 @@ def run_isolated_servers():
     })
     
     # Initialize Business API tables
+    api_engine = _get_api_engine()
     ApiBase.metadata.create_all(bind=api_engine)
 
     # Seed the enterprise org's plan row.
@@ -614,7 +617,7 @@ def run_isolated_servers():
     from api.models import OrganizationPlan as _OrganizationPlan
     from sqlalchemy.orm import Session as _Session
 
-    with _Session(api_engine) as _seed:
+    with _Session(_get_api_engine()) as _seed:
         _seed.merge(_OrganizationPlan(org="org-enterprise-id", plan="enterprise"))
         _seed.merge(_OrganizationPlan(org="org-infinite-id", plan="basic"))
         _seed.commit()
@@ -663,7 +666,7 @@ def test_complete_e2e_meeting_booking_flow(page: Page):
     from sqlalchemy.orm import Session
     from api.models import AgentConfig, Meeting
     
-    with Session(api_engine) as db_session:
+    with Session(_get_api_engine()) as db_session:
         db_session.query(Meeting).delete()
         db_session.commit()
         config = db_session.query(AgentConfig).filter_by(org="org-infinite-id").first()
@@ -738,7 +741,7 @@ def test_list_update_delete_meeting_flow(page: Page):
     from sqlalchemy.orm import Session
     from api.models import AgentConfig, Meeting
     
-    with Session(api_engine) as db_session:
+    with Session(_get_api_engine()) as db_session:
         db_session.query(Meeting).delete()
         db_session.commit()
         config = db_session.query(AgentConfig).filter_by(org="org-infinite-id").first()
