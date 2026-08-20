@@ -26,6 +26,7 @@ venv/
 Thumbs.db
 
 .claude/
+.cursor/
 .desloppify/
 .sisyphus/
 scratch/
