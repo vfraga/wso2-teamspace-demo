@@ -1,6 +1,7 @@
 import pytest
 from api.auth import get_current_user, UserInfo
 from api.main import app as api_app
+from common.m2m_auth import SERVICE_SCOPE
 from tests.helpers.tokens import issuer_for, patch_api_jwks, service_auth_header
 
 # Define a standard mock user with full scopes
@@ -364,17 +365,15 @@ def test_agent_config_get_with_wrong_issuer_returns_401(
     assert resp.status_code == 401
 
 
-def test_agent_config_get_without_internal_service_scope_returns_403(
+def test_agent_config_get_without_service_scope_returns_403(
     api_client, service_auth, no_user_override
 ):
-    # A validly signed token for this audience is not enough — it must carry
-    # the application-only `internal_service` scope.
     resp = api_client.get(
         "/agent-config/org/numbainfinite",
         headers=service_auth(scope="list_meetings create_meeting"),
     )
     assert resp.status_code == 403
-    assert "internal_service" in resp.json()["detail"]
+    assert SERVICE_SCOPE in resp.json()["detail"]
 
 
 def test_agent_config_get_rejects_user_token_in_service_header(

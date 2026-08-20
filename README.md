@@ -367,8 +367,8 @@ with OAuth 2.0 client-credentials tokens minted from `CLIENT_ID` and
 
 The receiver verifies the token the same way it verifies a user token, RS256
 against JWKS with audience, issuer and expiry enforced
-(`common/jwt_validation.py`), then requires the `internal_service` scope
-(`common/m2m_auth.py`).
+(`common/jwt_validation.py`), then requires the `teamspace_internal_service`
+scope (`common/m2m_auth.py`).
 
 `Authorization` stays reserved for the end-user JWT. The Business API's
 `GET /agent-config/org/{org_id}` wants both principals at once: the service as the
@@ -376,19 +376,12 @@ trust gate and the user for the audit record. Separate headers keep them distinc
 with no precedence rules to get wrong, and the same shape works on the
 portal-to-agent hop, where no user token is sent at all.
 
-> [!IMPORTANT]
-> `setup_is.py` provisions `internal_service` on a "Teamspace Internal Services"
-> API resource (`urn:teamspace:internal`) authorized with
-> `policyIdentifier: NO_POLICY`. This is required, not a preference. WSO2 grants
-> RBAC-policy scopes through a user's roles, and a client-credentials token has no
-> user, so under RBAC the token is issued successfully with an empty `scope`
-> claim and every M2M call returns 403. `ServiceTokenClient` detects that case and
-> logs the likely cause rather than passing on a token that cannot work.
-
-Because `internal_service` is granted to the application and to no user role, a
-user-bearing token can never carry it. The scope is therefore the real gate. The
-`aut=APPLICATION` claim is checked as well, but only when present, so a WSO2 build
-that omits it does not break every M2M call.
+`setup_is.py` provisions `teamspace_internal_service` on a "Teamspace Internal
+Services" API resource (`urn:teamspace:internal`). Because that scope is granted
+to the application and to no user role, a user-bearing token can never carry it.
+The scope is therefore the real gate. The `aut=APPLICATION` claim is checked as
+well, but only when present, so a WSO2 build that omits it does not break every
+M2M call.
 
 ### Shared state
 
@@ -757,9 +750,8 @@ This is demo software. If you build on it, these are the things to settle first.
    `AGENT_STATE_SIGNING_SECRET` and per-organization agent secrets in a secrets
    manager and inject them as environment variables.
 5. **Service-to-service auth.** M2M calls already use short-lived
-   client-credentials tokens verified against JWKS. Confirm the
-   `internal_service` API resource is authorized with `NO_POLICY`, and run every
-   hop over TLS. mTLS between services is a reasonable second layer.
+   client-credentials tokens verified against JWKS. Run every hop over TLS.
+   mTLS between services is a reasonable second layer.
 6. **Production flag.** `FLASK_ENV=production` turns on secure session cookies
    and the CSP header, sets `INFO` logging, hands the schema to Alembic, and makes
    a missing OAuth state-signing key fatal at startup.

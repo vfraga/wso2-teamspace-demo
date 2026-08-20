@@ -20,6 +20,7 @@ import requests
 from dotenv import load_dotenv
 from webapp.is_client import ISClient
 from common.config import CommonDefaults
+from common.m2m_auth import SERVICE_SCOPE
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -347,18 +348,7 @@ def _get_api_resource_id(s, filter_query, name):
 
 
 def _authorize_api(s, app_id, api_id, scopes, policy="RBAC"):
-    """Authorize an API resource for the application.
-
-    `policy` selects WSO2's scope-granting policy:
-
-    - "RBAC" (default) grants scopes through the user's roles. Correct for
-      every user-facing API, and the reason a role change takes effect without
-      touching the app.
-    - "NO_POLICY" grants the scopes to the *application* itself. Required for
-      application-only (client-credentials) tokens: under RBAC there is no user,
-      so no roles, so the token comes back with an empty `scope` claim and every
-      call it makes is rejected. See the internal-services resource below.
-    """
+    """Authorize an API resource for the application."""
     if not api_id:
         return
     resp = s.post(f"{TENANT_API}/applications/{app_id}/authorized-apis", auth=TENANT_ADMIN_AUTH, json={
@@ -422,17 +412,15 @@ def setup_api_resources(s, app_id):
 
     print("  Internal Services API (M2M client credentials):")
     # Backs the X-Service-Authorization header used for service-to-service
-    # calls (webapp -> agent, webapp/agent -> Business API). NO_POLICY is
-    # mandatory here: these tokens are minted with grant_type=client_credentials
-    # and have no user behind them, so an RBAC policy would grant no scopes.
+    # calls (webapp -> agent, webapp/agent -> Business API).
     internal_scopes = [
-        {"name": "internal_service", "displayName": "Internal Service Call"},
+        {"name": SERVICE_SCOPE, "displayName": "Internal Service Call"},
     ]
     internal_id = _create_api_resource(
         s, "Teamspace Internal Services", "urn:teamspace:internal",
         "Service-to-service authentication for the Teamspace microservices", internal_scopes,
     )
-    _authorize_api(s, app_id, internal_id, ["internal_service"], policy="NO_POLICY")
+    _authorize_api(s, app_id, internal_id, [SERVICE_SCOPE])
 
     print("  Agent APIs:")
     agent_api_id = _get_api_resource_id(s, "identifier eq /scim2/Agents", "SCIM2 Agents API")

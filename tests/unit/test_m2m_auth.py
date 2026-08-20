@@ -181,19 +181,13 @@ def test_a_short_lifetime_never_produces_a_negative_ttl():
 
 
 def test_token_without_the_requested_scope_is_refused(caplog):
-    """The NO_POLICY trap: a valid token that carries no usable scope.
-
-    WSO2 grants RBAC-policy scopes through user roles, so an application-only
-    token authorized under RBAC comes back with an empty `scope`. Returning it
-    would produce a confusing 403 on every downstream call, so refuse it here
-    and say why.
-    """
     client = ServiceTokenClient(_config, label="test")
     payload = {"access_token": "tok-1", "expires_in": 3600, "scope": ""}
     with patch("common.m2m_auth.requests.post", return_value=_token_response(payload=payload)):
         with caplog.at_level("ERROR"):
             assert client.get_token() is None
-    assert "NO_POLICY" in caplog.text
+    assert "WITHOUT" in caplog.text
+    assert SERVICE_SCOPE in caplog.text
 
 
 def test_missing_credentials_returns_none_without_a_request():

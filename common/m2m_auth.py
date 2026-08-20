@@ -8,21 +8,17 @@ an OBO flow for an arbitrary user.
 What replaces it:
 
 * **Callers** obtain a short-lived token from WSO2 IS with
-  ``grant_type=client_credentials`` and the ``internal_service`` scope, and send
-  it in the ``X-Service-Authorization`` header.
+  ``grant_type=client_credentials`` and the ``teamspace_internal_service``
+  scope, and send it in the ``X-Service-Authorization`` header.
 * **Receivers** verify it like any other WSO2 token — RS256 against JWKS, with
-  audience, issuer and expiry enforced — then require the ``internal_service``
-  scope.
+  audience, issuer and expiry enforced — then require the
+  ``teamspace_internal_service`` scope.
 
 ``Authorization`` is deliberately left for the *end-user* JWT. The Business API's
 ``GET /agent-config/org/{org_id}`` wants both principals at once: the service as
 the trust gate, the user for the audit line. A separate header keeps them
 distinct with no precedence rules to get wrong, and the same shape works on the
 webapp -> agent hop where no user token is sent at all.
-
-Why ``internal_service`` is sufficient as the gate: it is authorized to the
-application with ``NO_POLICY`` (see ``setup_is.py``) and granted to no user
-role, so a user-bearing token can never carry it.
 """
 
 import logging
@@ -39,7 +35,7 @@ from common.safe_auth_logger import SafeAuthLogger
 logger = logging.getLogger(__name__)
 
 #: Scope marking a token as an internal service credential.
-SERVICE_SCOPE = "internal_service"
+SERVICE_SCOPE = "teamspace_internal_service"
 
 #: Header carrying the service token. Kept separate from ``Authorization``,
 #: which continues to carry the end-user JWT.
@@ -152,15 +148,11 @@ class ServiceTokenClient:
                 "client_credentials", payload, prefix=f"{self._label} service-token error"
             )
             return None
-        granted = payload.get("scope", "")
+        granted = payload.get("scope") or ""
         if config.scope not in granted.split():
-            # Almost always the NO_POLICY misconfiguration described in
-            # setup_is.py: the token is valid but carries no usable scope.
             logger.error(
-                "%s obtained a service token WITHOUT the %r scope (granted=%r). The "
-                "%r API resource is likely authorized with policyIdentifier=RBAC "
-                "instead of NO_POLICY, so application-only tokens get no scopes.",
-                self._label, config.scope, granted, config.scope,
+                "%s obtained a service token WITHOUT the %r scope (granted=%r)",
+                self._label, config.scope, granted,
             )
             return None
         return self._store(config, token, payload.get("expires_in"))

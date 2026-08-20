@@ -14,6 +14,8 @@ import base64
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 
+from common.m2m_auth import SERVICE_SCOPE
+
 # Generate RS256 key pair once for mock IS
 ALL_MOCK_SCOPES = " ".join([
     "openid", "email",
@@ -180,9 +182,8 @@ async def token(request: FastApiRequest, tenant: str = None):
     # Check the mock token modes:
     if grant_type == "client_credentials":
         # M2M service token: no user behind it, so no user claims. `aut` is
-        # APPLICATION and the scope is whatever was requested, mirroring the
-        # `internal_service` API resource authorized with NO_POLICY.
-        requested_scope = params.get("scope", "internal_service")
+        # APPLICATION and the scope is whatever was requested.
+        requested_scope = params.get("scope", SERVICE_SCOPE)
         payload = {
             "iss": iss,
             "aud": client_id,

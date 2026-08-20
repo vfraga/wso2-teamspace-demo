@@ -6,6 +6,7 @@ import jwt
 from unittest.mock import AsyncMock, patch, MagicMock
 from agent.state_manager import StateManager, FlowState, FrontendState
 from agent.tool_schemas import MEETING_BASE_ARGS
+from common.m2m_auth import SERVICE_SCOPE
 
 @pytest.fixture(autouse=True)
 def mock_validate_mcp_token():
@@ -372,12 +373,12 @@ def test_agent_chat_with_expired_service_token_is_rejected(agent_client, service
     assert "expired" in resp.json()["detail"].lower()
 
 
-def test_agent_chat_without_internal_service_scope_is_rejected(agent_client, service_auth):
+def test_agent_chat_without_service_scope_is_rejected(agent_client, service_auth):
     resp = agent_client.post(
         "/chat", json=_CHAT_PAYLOAD, headers=service_auth(scope="list_meetings"),
     )
     assert resp.status_code == 403
-    assert "internal_service" in resp.json()["detail"]
+    assert SERVICE_SCOPE in resp.json()["detail"]
 
 
 def test_agent_chat_missing_required_payload_fields(agent_client, service_auth):

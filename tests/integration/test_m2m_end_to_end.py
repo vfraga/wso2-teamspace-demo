@@ -27,10 +27,8 @@ CLIENT_ID = "m2m-e2e-client"
 CLIENT_SECRET = "m2m-e2e-secret"
 TENANT_PATH = "/t/teamspace"
 
-#: A client the mock IS treats as authorized under an RBAC policy: it issues a
-#: valid token but grants no scopes, exactly as WSO2 does for an application-only
-#: token when the API resource was not authorized with NO_POLICY.
-RBAC_MISCONFIGURED_CLIENT_ID = "rbac-misconfigured-client"
+#: A client the mock IS issues a valid token for, but with an empty scope.
+EMPTY_SCOPE_CLIENT_ID = "empty-scope-client"
 
 
 def _free_port() -> int:
@@ -54,12 +52,11 @@ def _make_mock_is(base_url: str) -> FastAPI:
         if form.get("grant_type") != "client_credentials":
             return {"error": "unsupported_grant_type"}
         client_id = form.get("client_id")
-        if client_id not in (CLIENT_ID, RBAC_MISCONFIGURED_CLIENT_ID):
+        if client_id not in (CLIENT_ID, EMPTY_SCOPE_CLIENT_ID):
             return {"error": "invalid_client"}
         if form.get("client_secret") != CLIENT_SECRET:
             return {"error": "invalid_client"}
-        # An RBAC-policy application gets a token with no scopes at all.
-        scope = "" if client_id == RBAC_MISCONFIGURED_CLIENT_ID else form.get("scope", "")
+        scope = "" if client_id == EMPTY_SCOPE_CLIENT_ID else form.get("scope", "")
         now = int(time.time())
         token = sign({
             "sub": client_id,
@@ -198,22 +195,14 @@ def test_full_loop_service_token_is_accepted_by_the_business_api(
         api_app.dependency_overrides.pop(get_db, None)
 
 
-def test_rbac_misconfigured_application_gets_no_usable_token(
+def test_application_token_without_requested_scope_is_refused(
     mock_is, api_pointed_at_mock_is, caplog
 ):
-    """The NO_POLICY trap, reproduced end to end.
-
-    WSO2 grants RBAC-policy scopes through user roles. An application-only
-    token has no user, so an API resource authorized under RBAC yields a valid
-    token with an empty `scope` claim — and every call it makes would 403 with
-    a misleading message. The client refuses it at the source and names the
-    likely cause instead.
-    """
     client = ServiceTokenClient(
         lambda: M2MConfig(
             is_base_url=mock_is,
             tenant_path=TENANT_PATH,
-            client_id=RBAC_MISCONFIGURED_CLIENT_ID,
+            client_id=EMPTY_SCOPE_CLIENT_ID,
             client_secret=CLIENT_SECRET,
             verify_tls=False,
         ),
@@ -221,7 +210,8 @@ def test_rbac_misconfigured_application_gets_no_usable_token(
     )
     with caplog.at_level("ERROR"):
         assert client.get_token() is None
-    assert "NO_POLICY" in caplog.text
+    assert "WITHOUT" in caplog.text
+    assert SERVICE_SCOPE in caplog.text
 
 
 def test_scope_mismatch_between_request_and_requirement_is_rejected(

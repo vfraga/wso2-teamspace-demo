@@ -3,6 +3,7 @@ import json
 import pytest
 
 from common.fastapi_errors import mask_request_body
+from common.m2m_auth import SERVICE_SCOPE
 from common.safe_auth_logger import format_claims, mask_email, mask_token
 
 
@@ -131,9 +132,9 @@ def test_format_claims_masks_email_and_omits_unlisted_claims():
 
 
 def test_format_claims_handles_service_token_without_user_claims():
-    out = format_claims({"sub": "svc", "aut": "APPLICATION", "scope": "internal_service"})
+    out = format_claims({"sub": "svc", "aut": "APPLICATION", "scope": SERVICE_SCOPE})
     assert "aut=APPLICATION" in out
-    assert "scope=[internal_service]" in out
+    assert f"scope=[{SERVICE_SCOPE}]" in out
     # No act/email present, so neither key is rendered at all.
     assert "act.sub" not in out
     assert "email" not in out

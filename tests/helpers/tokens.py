@@ -78,8 +78,8 @@ def service_token(
     """Mint a client-credentials-shaped token.
 
     Defaults match what WSO2 IS issues for `grant_type=client_credentials`
-    against the `internal_service`-authorized application: no user claims, an
-    `aut` of APPLICATION, and the service scope.
+    against the Teamspace application: no user claims, an `aut` of APPLICATION,
+    and the service scope.
     """
     now = int(time.time())
     payload = {

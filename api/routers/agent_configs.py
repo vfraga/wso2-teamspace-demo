@@ -27,7 +27,7 @@ def get_agent_config(
 
     Auth priority:
     1. `X-Service-Authorization` is the trust gate. When it carries a valid
-       client-credentials token with the `internal_service` scope, the caller is
+       client-credentials token with the `teamspace_internal_service` scope, the caller is
        a trusted service (webapp or agent). The user JWT — if also present in
        `Authorization` — is recorded for audit/observability only, NOT used for
        scope checks. This is the path used by the webapp's chat send_message and
