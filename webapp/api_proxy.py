@@ -4,6 +4,9 @@ from typing import Any, NamedTuple
 import requests
 from flask import session, current_app
 
+from common.constants import DEFAULT_PLAN
+from webapp.service_auth import service_token_client
+
 logger = logging.getLogger(__name__)
 
 
@@ -87,22 +90,29 @@ def get_agent_config(org_id: str) -> dict | None:
     return None
 
 
-def get_agent_config_via_internal_secret(org_id: str) -> dict | None:
-    """Fetch the agent config from the Business API using the M2M internal secret.
+def get_agent_config_via_service_token(org_id: str) -> dict | None:
+    """Fetch the agent config from the Business API using an M2M service token.
 
-    The user's access token (if present in the session) is forwarded too so the
-    API can record who triggered the request for audit. The internal secret is
-    the auth gate; the JWT is for observability.
+    The user's access token (if present in the session) is still forwarded in
+    `Authorization` so the API can record who triggered the request for audit;
+    the service token in `X-Service-Authorization` is the auth gate. That split
+    is why the two credentials use separate headers — see `common/m2m_auth.py`.
     """
-    secret = current_app.config.get("BUSINESS_API_INTERNAL_SECRET", "")
-    if not secret:
+    headers = service_token_client().auth_headers()
+    if not headers:
         logger.debug(
-            "BUSINESS_API_INTERNAL_SECRET not configured; skipping M2M agent-config fetch for org=%s",
+            "No service token available; skipping M2M agent-config fetch for org=%s",
             org_id,
         )
         return None
-    headers = {"X-Internal-Secret": secret}
     resp = api_request("GET", f"/agent-config/org/{org_id}", headers=headers)
+    if resp.status_code == 401:
+        # Token revoked or IS keys rotated — mint a fresh one and retry once.
+        logger.info("Service token rejected by the Business API; retrying with a fresh token")
+        retry_headers = service_token_client().auth_headers(force_refresh=True)
+        if not retry_headers:
+            return None
+        resp = api_request("GET", f"/agent-config/org/{org_id}", headers=retry_headers)
     if resp.status_code == 200:
         return resp.json()
     return None
@@ -117,10 +127,47 @@ def delete_agent_config(org_id: str) -> ApiResult:
 
 
 def get_organization_plan(org_id: str, token: str = None) -> dict[str, Any]:
+    """The org's plan, defaulting to basic. Safe for display and feature hints.
+
+    Do NOT use this for authorization decisions: it cannot tell "this org has
+    no subscription" from "the Business API is unreachable", and reports both as
+    basic. Use `resolve_plan_for_gating` where the answer gates access.
+    """
     resp = api_request("GET", f"/plans/org/{org_id}", token=token)
     if resp.status_code == 200:
         return resp.json()
-    return {"org": org_id, "plan": "basic"}
+    return {"org": org_id, "plan": DEFAULT_PLAN}
+
+
+def resolve_plan_for_gating(org_id: str, token: str = None) -> str | None:
+    """The org's plan for an access decision, or None if it cannot be determined.
+
+    The distinction `get_organization_plan` throws away:
+
+    * ``200`` — the stored plan. Authoritative.
+    * ``404`` — no plan row, so no subscription. Authoritative: signup always
+      writes one (`webapp/blueprints/signup.py`), so its absence means the org
+      never selected a paid plan.
+    * anything else (503, 5xx, connection refused) — unknown. Returning
+      ``DEFAULT_PLAN`` here would silently revoke paid features during a
+      Business API outage, so callers are told they don't know instead.
+    """
+    if not org_id:
+        return None
+    resp = api_request("GET", f"/plans/org/{org_id}", token=token)
+    if resp.status_code == 200:
+        try:
+            return resp.json().get("plan") or DEFAULT_PLAN
+        except ValueError:
+            logger.warning("Plan lookup for org=%s returned non-JSON", org_id)
+            return None
+    if resp.status_code == 404:
+        return DEFAULT_PLAN
+    logger.warning(
+        "Plan lookup for org=%s failed with %s; treating the plan as unknown",
+        org_id, resp.status_code,
+    )
+    return None
 
 
 def save_organization_plan(org_id: str, plan_id: str, token: str = None) -> ApiResult:

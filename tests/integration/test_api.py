@@ -1,6 +1,7 @@
 import pytest
 from api.auth import get_current_user, UserInfo
 from api.main import app as api_app
+from tests.helpers.tokens import issuer_for, patch_api_jwks, service_auth_header
 
 # Define a standard mock user with full scopes
 mock_user_claims = {
@@ -252,14 +253,49 @@ def test_cross_tenant_isolation(api_client, db_session):
     api_app.dependency_overrides.pop(get_current_user, None)
 
 
-def test_agent_config_get_via_internal_secret_m2m(api_client, db_session, monkeypatch):
-    from api.models import AgentConfig
+# ---------------------------------------------------------------------------
+# Service-to-service auth on GET /agent-config/org/{org_id}
+#
+# The X-Internal-Secret shared secret was replaced by OAuth 2.0
+# client-credentials tokens, so these exercise real RS256 tokens verified
+# against a stubbed JWKS — the same path a live WSO2 IS token takes.
+# ---------------------------------------------------------------------------
+
+TEST_AUDIENCE = "test-client-id"
+
+
+@pytest.fixture
+def service_auth(monkeypatch):
+    """Mint valid `X-Service-Authorization` headers for the Business API."""
     from api.config import settings
+
+    monkeypatch.setattr(settings, "CLIENT_ID", TEST_AUDIENCE)
+    issuer = issuer_for(settings.IS_BASE_URL, settings.TENANT_PATH)
+
+    def _headers(**overrides):
+        overrides.setdefault("audience", TEST_AUDIENCE)
+        overrides.setdefault("issuer", issuer)
+        return service_auth_header(**overrides)
+
+    with patch_api_jwks():
+        yield _headers
+
+
+@pytest.fixture
+def no_user_override():
+    """Drop the autouse user override so only M2M auth is in play."""
+    api_app.dependency_overrides.pop(get_current_user, None)
+    yield
+    api_app.dependency_overrides[get_current_user] = lambda: UserInfo(mock_user_claims)
+
+
+def _seed_agent_config(db_session, org: str, agent_id: str):
+    from api.models import AgentConfig
 
     db_session.add(
         AgentConfig(
-            org="numbainfinite",
-            agent_id="agent-m2m-001",
+            org=org,
+            agent_id=agent_id,
             agent_secret="m2m-secret",
             display_name="M2M Agent",
             gemini_api_key="k",
@@ -268,114 +304,122 @@ def test_agent_config_get_via_internal_secret_m2m(api_client, db_session, monkey
     )
     db_session.commit()
 
-    monkeypatch.setattr(settings, "INTERNAL_SECRET", "test-shared-secret")
 
-    resp = api_client.get(
-        "/agent-config/org/numbainfinite",
-        headers={"X-Internal-Secret": "test-shared-secret"},
-    )
+def test_agent_config_get_via_service_token(api_client, db_session, service_auth):
+    _seed_agent_config(db_session, "numbainfinite", "agent-m2m-001")
+
+    resp = api_client.get("/agent-config/org/numbainfinite", headers=service_auth())
     assert resp.status_code == 200
     assert resp.json()["agent_id"] == "agent-m2m-001"
 
 
-def test_agent_config_get_with_wrong_internal_secret_returns_401(api_client, monkeypatch):
-    from api.config import settings
-
-    api_app.dependency_overrides.pop(get_current_user, None)
-    monkeypatch.setattr(settings, "INTERNAL_SECRET", "test-shared-secret")
-    try:
-        resp = api_client.get(
-            "/agent-config/org/numbainfinite",
-            headers={"X-Internal-Secret": "wrong-secret"},
-        )
-        assert resp.status_code == 401
-    finally:
-        def restore():
-            return UserInfo(mock_user_claims)
-        api_app.dependency_overrides[get_current_user] = restore
+def test_agent_config_get_with_no_auth_returns_401(api_client, no_user_override):
+    resp = api_client.get("/agent-config/org/numbainfinite")
+    assert resp.status_code == 401
+    assert "X-Service-Authorization" in resp.json()["detail"]
 
 
-def test_agent_config_get_with_no_auth_returns_401(api_client, monkeypatch):
-    from api.config import settings
-
-    api_app.dependency_overrides.pop(get_current_user, None)
-    monkeypatch.setattr(settings, "INTERNAL_SECRET", "test-shared-secret")
-    try:
-        resp = api_client.get("/agent-config/org/numbainfinite")
-        assert resp.status_code == 401
-    finally:
-        def restore():
-            return UserInfo(mock_user_claims)
-        api_app.dependency_overrides[get_current_user] = restore
-
-
-def test_agent_config_get_internal_secret_with_user_jwt_audit(api_client, db_session, monkeypatch):
-    from api.config import settings
-    from api.models import AgentConfig
-
-    db_session.add(
-        AgentConfig(
-            org="numbainfinite",
-            agent_id="agent-m2m-audit",
-            agent_secret="audit-secret",
-            display_name="Audit Agent",
-            gemini_api_key="k",
-            org_client_id="c",
-        )
+def test_agent_config_get_with_unverifiable_token_returns_401(
+    api_client, service_auth, no_user_override
+):
+    # A syntactically plausible token that this JWKS cannot verify. Under the
+    # old scheme any attacker-chosen string was compared to a static secret;
+    # now the signature itself is the gate.
+    resp = api_client.get(
+        "/agent-config/org/numbainfinite",
+        headers={"X-Service-Authorization": "Bearer not-a-real-jwt"},
     )
-    db_session.commit()
+    assert resp.status_code == 401
 
-    monkeypatch.setattr(settings, "INTERNAL_SECRET", "test-shared-secret")
+
+def test_agent_config_get_with_expired_service_token_returns_401(
+    api_client, service_auth, no_user_override
+):
+    # The central improvement over the shared secret: these credentials expire.
+    resp = api_client.get(
+        "/agent-config/org/numbainfinite",
+        headers=service_auth(expires_in=-60),
+    )
+    assert resp.status_code == 401
+    assert "expired" in resp.json()["detail"].lower()
+
+
+def test_agent_config_get_with_wrong_audience_returns_401(
+    api_client, service_auth, no_user_override
+):
+    resp = api_client.get(
+        "/agent-config/org/numbainfinite",
+        headers=service_auth(audience="some-other-client"),
+    )
+    assert resp.status_code == 401
+
+
+def test_agent_config_get_with_wrong_issuer_returns_401(
+    api_client, service_auth, no_user_override
+):
+    resp = api_client.get(
+        "/agent-config/org/numbainfinite",
+        headers=service_auth(issuer="https://evil.example.com/oauth2/token"),
+    )
+    assert resp.status_code == 401
+
+
+def test_agent_config_get_without_internal_service_scope_returns_403(
+    api_client, service_auth, no_user_override
+):
+    # A validly signed token for this audience is not enough — it must carry
+    # the application-only `internal_service` scope.
+    resp = api_client.get(
+        "/agent-config/org/numbainfinite",
+        headers=service_auth(scope="list_meetings create_meeting"),
+    )
+    assert resp.status_code == 403
+    assert "internal_service" in resp.json()["detail"]
+
+
+def test_agent_config_get_rejects_user_token_in_service_header(
+    api_client, service_auth, no_user_override
+):
+    # Defence in depth: even if a user token somehow carried the scope, its
+    # `aut=APPLICATION_USER` marks it as not an application credential.
+    resp = api_client.get(
+        "/agent-config/org/numbainfinite",
+        headers=service_auth(aut="APPLICATION_USER"),
+    )
+    assert resp.status_code == 403
+    assert "aut=" in resp.json()["detail"]
+
+
+def test_agent_config_get_service_token_with_user_jwt_audit(
+    api_client, db_session, service_auth
+):
+    """A service token is the gate; the user JWT is only recorded for audit.
+
+    This is the chat path: a non-admin without `view_agent_config` must still
+    be able to start an OBO flow.
+    """
+    _seed_agent_config(db_session, "numbainfinite", "agent-m2m-audit")
 
     no_scope_claims = {
         **mock_user_claims,
         "scope": "create_meeting list_meetings view_meeting",
     }
-
-    def override_user():
-        return UserInfo(no_scope_claims)
-    api_app.dependency_overrides[get_current_user] = override_user
+    api_app.dependency_overrides[get_current_user] = lambda: UserInfo(no_scope_claims)
     try:
-        resp = api_client.get(
-            "/agent-config/org/numbainfinite",
-            headers={"X-Internal-Secret": "test-shared-secret"},
-        )
+        resp = api_client.get("/agent-config/org/numbainfinite", headers=service_auth())
         assert resp.status_code == 200
         assert resp.json()["agent_id"] == "agent-m2m-audit"
     finally:
-        def restore():
-            return UserInfo(mock_user_claims)
-        api_app.dependency_overrides[get_current_user] = restore
+        api_app.dependency_overrides[get_current_user] = lambda: UserInfo(mock_user_claims)
 
 
-def test_agent_config_get_internal_secret_to_different_org_allowed(api_client, db_session, monkeypatch):
-    from api.config import settings
-    from api.models import AgentConfig
+def test_agent_config_get_service_token_to_different_org_allowed(
+    api_client, db_session, service_auth, no_user_override
+):
+    # A trusted service is trusted to name the org it is serving — the same
+    # trust model as before, now on a short-lived verifiable credential.
+    _seed_agent_config(db_session, "other-org", "agent-other")
 
-    db_session.add(
-        AgentConfig(
-            org="other-org",
-            agent_id="agent-other",
-            agent_secret="other-secret",
-            display_name="Other Agent",
-            gemini_api_key="k",
-            org_client_id="c",
-        )
-    )
-    db_session.commit()
-
-    monkeypatch.setattr(settings, "INTERNAL_SECRET", "test-shared-secret")
-
-    api_app.dependency_overrides.pop(get_current_user, None)
-    try:
-        resp = api_client.get(
-            "/agent-config/org/other-org",
-            headers={"X-Internal-Secret": "test-shared-secret"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["agent_id"] == "agent-other"
-    finally:
-        def restore():
-            return UserInfo(mock_user_claims)
-        api_app.dependency_overrides[get_current_user] = restore
-
+    resp = api_client.get("/agent-config/org/other-org", headers=service_auth())
+    assert resp.status_code == 200
+    assert resp.json()["agent_id"] == "agent-other"

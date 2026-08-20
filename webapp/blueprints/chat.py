@@ -7,8 +7,9 @@ import requests
 from flask import Blueprint, render_template, request, session, current_app, jsonify, Response, stream_with_context
 
 import jwt
+from webapp.service_auth import service_auth_headers
 from webapp.utils.decorators import login_required
-from webapp.api_proxy import get_agent_config_via_internal_secret
+from webapp.api_proxy import get_agent_config_via_service_token
 from webapp.utils.i18n import get_locale
 from common.constants import DEFAULT_AGENT_NAME
 
@@ -62,11 +63,12 @@ def _ensure_thread_id() -> str:
 
 
 def _agent_headers() -> dict:
-    headers = {}
-    internal_secret = current_app.config.get("AGENT_INTERNAL_SECRET")
-    if internal_secret:
-        headers["X-Internal-Secret"] = internal_secret
-    return headers
+    """Authenticate this portal to the agent service.
+
+    An empty dict means no service token could be minted; the agent will then
+    reject the call with a 401 rather than serving an unauthenticated caller.
+    """
+    return service_auth_headers()
 
 
 def _build_agent_chat_payload(thread_id: str, message: str, user: dict, agent_cfg) -> dict:
@@ -86,22 +88,22 @@ def _build_agent_chat_payload(thread_id: str, message: str, user: dict, agent_cf
 
 
 def _build_agent_chat_payload_via_m2m(thread_id: str, message: str, user: dict) -> dict:
-    """Build the agent chat payload using the M2M internal-secret path.
+    """Build the agent chat payload using the M2M service-token path.
 
-    The Business API's GET /agent-config/org/{org_id} now accepts an
-    `X-Internal-Secret` header for trusted callers, with the user's JWT
-    forwarded for audit. Non-admin users no longer hit the
+    The Business API's GET /agent-config/org/{org_id} accepts an
+    `X-Service-Authorization` service token for trusted callers, with the
+    user's JWT forwarded for audit. Non-admin users no longer hit the
     `view_agent_config` scope wall; the agent receives the agent_id/
     agent_secret/gemini_key it needs to start the OBO flow (which
     requires the agent's own token as the actor_token per RFC 8693).
 
-    Falls back to an empty agent_cfg if the internal secret is not
-    configured or the API returns 404 — the agent service can still
+    Falls back to an empty agent_cfg if no service token can be minted
+    or the API returns 404 — the agent service can still
     discover config from its own state_manager / M2M cache.
     """
     org_id = user.get("org_id", "")
     agent_cfg = (
-        get_agent_config_via_internal_secret(org_id) if org_id else None
+        get_agent_config_via_service_token(org_id) if org_id else None
     )
     return _build_agent_chat_payload(thread_id, message, user, agent_cfg)
 
@@ -227,11 +229,7 @@ def clear_chat(org_handle):
     if thread_id:
         agent_url = current_app.config["AGENT_SERVICE_URL"]
         try:
-            headers = {}
-            internal_secret = current_app.config.get("AGENT_INTERNAL_SECRET")
-            if internal_secret:
-                headers["X-Internal-Secret"] = internal_secret
-            requests.post(f"{agent_url}/clear/{thread_id}", headers=headers, timeout=5)
+            requests.post(f"{agent_url}/clear/{thread_id}", headers=_agent_headers(), timeout=5)
         except Exception as e:
             logger.warning("Failed to clear agent service state for thread %s: %s", thread_id, e)
 

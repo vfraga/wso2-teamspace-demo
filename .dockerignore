@@ -1,0 +1,28 @@
+.venv/
+venv/
+__pycache__/
+*/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Runtime state, never baked into an image
+flask_session/
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets
+.env
+
+.git/
+.github/
+.idea/
+.vscode/
+.DS_Store
+
+tests/
+scratch/
+.desloppify/
+.sisyphus/
+.claude/

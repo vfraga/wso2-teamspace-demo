@@ -17,8 +17,15 @@ for svc in api agent webapp; do
     fi
 done
 
+# Development-mode processes
 pkill -f "uvicorn api.main:app" 2>/dev/null || true
 pkill -f "uvicorn agent.main:app" 2>/dev/null || true
 pkill -f "flask run" 2>/dev/null || true
+
+# SERVE_MODE=production processes. Killing the gunicorn master via the PID file
+# above normally reaps its workers; these sweep up anything orphaned.
+pkill -f "gunicorn api.main:app" 2>/dev/null || true
+pkill -f "gunicorn agent.main:app" 2>/dev/null || true
+pkill -f "gunicorn webapp.app:create_app" 2>/dev/null || true
 
 echo "Done."

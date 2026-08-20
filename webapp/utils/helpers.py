@@ -2,6 +2,7 @@ import re
 
 from flask import session
 
+from common.safe_auth_logger import mask_token as _mask_token
 from webapp.utils.roles import (
     TEAMSPACE_ADMIN, BASIC_BRANDING_EDITOR, ADVANCED_BRANDING_EDITOR, IDP_MANAGER,
 )
@@ -14,10 +15,9 @@ def slugify(text: str) -> str:
     return re.sub(r"-+", "-", text).strip("-")
 
 
-def mask_token(token: str, visible: int = 10) -> str:
-    if len(token) <= visible:
-        return token
-    return token[:visible] + "..." + token[-4:]
+# Re-exported from common so the redaction policy lives in exactly one place
+# (common/safe_auth_logger.py). Kept importable from here for existing callers.
+mask_token = _mask_token
 
 
 def contrast_text(hex_color: str, light: str = "#FFFFFF", dark: str = "#111827") -> str:

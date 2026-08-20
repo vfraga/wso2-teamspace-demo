@@ -46,6 +46,28 @@ def admin_session(flask_app):
         "access_token_claims": {"sub": "admin-12345", "scope": "openid email create_meeting list_meetings view_agent_config manage_agent_config"}
     }
 
+
+@pytest.fixture(autouse=True)
+def stub_plan_lookup():
+    """Pin the org plan so these tests don't depend on ambient network state.
+
+    The plan gate calls `resolve_plan_for_gating`, which reaches the Business
+    API. These tests used to pass only because localhost:9091 was *unreachable*
+    — connection-refused reads as "plan unknown", which falls back to a
+    role-only check. With a Business API actually running (a developer's own
+    stack, say) the same call returned 404, which is authoritatively "basic",
+    and the IdP tests flipped to failing.
+
+    Default to "enterprise" here because every test in this module that reaches
+    a plan gate is exercising an entitled org; the two upgrade-prompt tests
+    override it. Tests that own the whole decision table live in
+    tests/integration/test_plan_gating.py.
+    """
+    with patch("webapp.blueprints.admin.resolve_plan_for_gating", return_value="enterprise"), \
+         patch("webapp.blueprints.agents.resolve_plan_for_gating", return_value="enterprise"):
+        yield
+
+
 def test_landing_page(flask_client):
     resp = flask_client.get("/")
     assert resp.status_code == 200
@@ -136,7 +158,8 @@ def test_idp_unauthorized_standard_user(flask_client, logged_in_session):
 def test_idp_upgrade_prompt_for_admin_without_idp_manager(flask_client, admin_session):
     with flask_client.session_transaction() as sess:
         sess.update(admin_session)
-    resp = flask_client.get("/o/numbainfinite/admin/idp")
+    with patch("webapp.blueprints.admin.resolve_plan_for_gating", return_value="basic"):
+        resp = flask_client.get("/o/numbainfinite/admin/idp")
     assert resp.status_code == 200
     assert b"Upgrade Required" in resp.data
     assert b"To bring your identity provider, upgrade your plan" in resp.data
@@ -175,7 +198,8 @@ def test_idp_edit_unauthorized_standard_user(flask_client, logged_in_session):
 def test_idp_edit_upgrade_prompt_for_admin_without_idp_manager(flask_client, admin_session):
     with flask_client.session_transaction() as sess:
         sess.update(admin_session)
-    resp = flask_client.get("/o/numbainfinite/admin/idp/idp-123/edit")
+    with patch("webapp.blueprints.admin.resolve_plan_for_gating", return_value="basic"):
+        resp = flask_client.get("/o/numbainfinite/admin/idp/idp-123/edit")
     assert resp.status_code == 200
     assert b"Upgrade Required" in resp.data
 

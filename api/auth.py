@@ -1,4 +1,3 @@
-import json
 import logging
 import threading
 import time
@@ -6,9 +5,18 @@ from typing import Any, Optional
 
 import httpx
 import jwt
-from fastapi import HTTPException, Header, Security
+from fastapi import HTTPException, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+from common.jwt_validation import (
+    SigningKeyNotFound,
+    decode_rs256,
+    jwks_url,
+    select_signing_key,
+    token_issuer,
+)
+from common.m2m_auth import make_service_auth_dependency
+from common.safe_auth_logger import format_claims
 from api.config import settings
 
 logger = logging.getLogger(__name__)
@@ -58,13 +66,10 @@ def get_jwks(is_base_url: str, tenant_path: str) -> dict[str, Any]:
     if cached is not None:
         return cached
 
-    logger.debug("Fetching JWKS from %s%s/oauth2/jwks", is_base_url, tenant_path)
+    url = jwks_url(is_base_url, tenant_path)
+    logger.debug("Fetching JWKS from %s", url)
     try:
-        resp = httpx.get(
-            f"{is_base_url}{tenant_path}/oauth2/jwks",
-            verify=settings.IS_VERIFY_TLS,
-            timeout=5,
-        )
+        resp = httpx.get(url, verify=settings.IS_VERIFY_TLS, timeout=5)
         resp.raise_for_status()
         data = resp.json()
     except httpx.HTTPError as e:
@@ -96,37 +101,22 @@ def get_current_user(
     token = credentials.credentials
     try:
         jwks = get_jwks(settings.IS_BASE_URL, settings.TENANT_PATH)
-        header = jwt.get_unverified_header(token)
-        key = None
-        for k in jwks.get("keys", []):
-            if k["kid"] == header["kid"]:
-                key = jwt.get_algorithm_by_name("RS256").from_jwk(k)
-                break
-        if not key:
-            logger.warning("JWT signing key not found for kid=%s", header.get("kid"))
-            raise HTTPException(status_code=401, detail="Signing key not found")
-
-        decoded = jwt.decode(
+        key = select_signing_key(jwks, token)
+        decoded = decode_rs256(
             token,
-            key=key,
-            algorithms=["RS256"],
-            options={"verify_aud": True},
+            key,
             audience=settings.CLIENT_ID,
-            issuer=f"{settings.IS_BASE_URL}{settings.TENANT_PATH}/oauth2/token",
+            issuer=token_issuer(settings.IS_BASE_URL, settings.TENANT_PATH),
         )
-        logger.debug("Decoded JWT: %s", json.dumps(decoded, indent=2))
         user = UserInfo(decoded)
-        logger.info(
-            "Authenticated: sub=%s, org=%s, scope=%s",
-            user.user_id,
-            user.org,
-            user.scopes,
-        )
-        logger.debug(
-            "JWT auth detail: sub=%s, org=%s, aut=%s, scopes=%s",
-            user.user_id, user.org, user.auth_type, user.scopes,
-        )
+        # One masked summary instead of the previous full-payload dump plus a
+        # near-duplicate INFO line. Everything that makes the identity flow
+        # legible stays; the raw payload and the plaintext email do not.
+        logger.debug("Authenticated JWT claims: %s", format_claims(decoded))
         return user
+    except SigningKeyNotFound as e:
+        logger.warning("JWT rejected: %s", e)
+        raise HTTPException(status_code=401, detail="Signing key not found") from None
     except jwt.ExpiredSignatureError:
         logger.warning("JWT token expired")
         raise HTTPException(status_code=401, detail="Token expired") from None
@@ -162,20 +152,12 @@ def require_scope(scope: str):
     return checker
 
 
-def require_internal_secret(
-    x_internal_secret: Optional[str] = Header(None, alias="X-Internal-Secret"),
-) -> None:
-    """Authenticate a service-to-service call via a shared secret.
-
-    The webapp and the agent service both know `settings.INTERNAL_SECRET`
-    (from the deployment's env). When calling an endpoint that opts in
-    to M2M auth, the caller presents the secret in the `X-Internal-Secret`
-    header. We fail closed: if the secret is unset on either side, or if
-    the header doesn't match, the call is rejected.
-    """
-    if not settings.INTERNAL_SECRET:
-        logger.warning("INTERNAL_SECRET is not set on the API; rejecting M2M call")
-        raise HTTPException(status_code=503, detail="Internal auth not configured")
-    if not x_internal_secret or x_internal_secret != settings.INTERNAL_SECRET:
-        logger.warning("X-Internal-Secret header missing or invalid on M2M call")
-        raise HTTPException(status_code=401, detail="Invalid or missing X-Internal-Secret")
+# Inbound M2M authentication. Built from the shared factory so this and the
+# agent's equivalent cannot drift apart; the Business API supplies its own
+# fail-closed JWKS getter (`get_jwks` raises 503 rather than serving stale keys).
+require_service_auth = make_service_auth_dependency(
+    jwks_getter=lambda: get_jwks(settings.IS_BASE_URL, settings.TENANT_PATH),
+    audience_getter=lambda: settings.CLIENT_ID,
+    issuer_getter=lambda: token_issuer(settings.IS_BASE_URL, settings.TENANT_PATH),
+    label="Business API",
+)

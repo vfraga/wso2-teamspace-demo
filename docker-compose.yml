@@ -1,0 +1,147 @@
+# Teamspace demo stack: the three services plus Redis for shared agent state.
+#
+# WSO2 Identity Server is NOT included. It is provisioned out-of-band by
+# setup_is.py against an install you control (tenants, API resources, roles,
+# branding), so compose consumes it via IS_BASE_URL rather than trying to host
+# and bootstrap it. Point IS_BASE_URL at your instance; from inside these
+# containers a WSO2 IS on the host is reachable at host.docker.internal.
+#
+# Required in .env (or the environment): CLIENT_ID, CLIENT_SECRET, APP_ID,
+# GEMINI_API_KEY, FLASK_SECRET_KEY, AGENT_STATE_SIGNING_SECRET.
+#
+#   docker compose up --build
+#
+# Apply the schema before first serve (DB_AUTO_CREATE is off in production):
+#   docker compose run --rm business-api alembic upgrade head
+
+x-common-env: &common-env
+  IS_BASE_URL: ${IS_BASE_URL:-https://host.docker.internal:9443}
+  IS_ORG_HANDLE: ${IS_ORG_HANDLE:-teamspace}
+  # The demo's WSO2 IS uses a self-signed localhost certificate. Set true and
+  # mount a trusted CA bundle for anything real.
+  IS_VERIFY_TLS: ${IS_VERIFY_TLS:-false}
+  CLIENT_ID: ${CLIENT_ID:?set CLIENT_ID (from setup_is.py)}
+  CLIENT_SECRET: ${CLIENT_SECRET:?set CLIENT_SECRET (from setup_is.py)}
+  APP_ID: ${APP_ID:-}
+  APP_NAME: ${APP_NAME:-Teamspace}
+  FLASK_ENV: production
+  SERVE_MODE: production
+  # Production defaults to INFO. Set DEBUG to watch the identity flow.
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  # Docker's bridge NAT makes every external client look like the gateway
+  # address, so without this the rate limiter puts them all in one bucket.
+  # Safe here because the only thing in front of these services is Docker.
+  RATE_LIMIT_TRUST_FORWARDED_FOR: "true"
+  DATABASE_URL: ${DATABASE_URL:-sqlite:////data/teamspace.db}
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5001}
+  REDIS_URL: redis://redis:6379/0
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Keep agent state (OBO tokens, chat history) in memory only: it is
+    # short-lived by design and should not outlive the container.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  business-api:
+    build: .
+    restart: unless-stopped
+    command:
+      - gunicorn
+      - api.main:app
+      - --worker-class=uvicorn.workers.UvicornWorker
+      - --workers=4
+      - --bind=0.0.0.0:9091
+    environment:
+      <<: *common-env
+    volumes:
+      - teamspace-data:/data
+    # Not published: the portal and agent reach this on the compose network.
+    # Uncomment to poke at it directly while debugging.
+    # ports:
+    #   - "9091:9091"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9091/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  ai-agent:
+    build: .
+    restart: unless-stopped
+    command:
+      - gunicorn
+      - agent.main:app
+      - --worker-class=uvicorn.workers.UvicornWorker
+      # Safe above one worker only because REDIS_URL is set above: /authorize
+      # and /callback land on different workers and must share OBO state.
+      - --workers=4
+      - --bind=0.0.0.0:8000
+    environment:
+      <<: *common-env
+      BUSINESS_API_URL: http://business-api:9091
+      AGENT_SERVICE_URL: ${AGENT_SERVICE_URL:-http://localhost:8000}
+      AGENT_REDIRECT_URI: ${AGENT_REDIRECT_URI:-http://localhost:8000/callback}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      MOCK_LLM: ${MOCK_LLM:-false}
+      AGENT_STATE_SIGNING_SECRET: ${AGENT_STATE_SIGNING_SECRET:?set AGENT_STATE_SIGNING_SECRET (must be stable across replicas)}
+    depends_on:
+      redis:
+        condition: service_healthy
+      business-api:
+        condition: service_healthy
+    # Not published. NOTE: the OBO consent popup is opened by the *browser*
+    # against AGENT_REDIRECT_URI, so if you demo that flow through compose you
+    # must publish this port and set AGENT_REDIRECT_URI to match.
+    # ports:
+    #   - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  webapp:
+    build: .
+    restart: unless-stopped
+    command:
+      - gunicorn
+      - webapp.app:create_app()
+      - --workers=4
+      - --bind=0.0.0.0:5001
+    environment:
+      <<: *common-env
+      BUSINESS_API_URL: http://business-api:9091
+      AGENT_SERVICE_URL: http://ai-agent:8000
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:?set FLASK_SECRET_KEY (must be stable across replicas)}
+      FLASK_HOST: ${FLASK_HOST:-localhost}
+      FLASK_PORT: ${FLASK_PORT:-5001}
+      FEDERATED_IDP_URL: ${FEDERATED_IDP_URL:-}
+      FEDERATED_IDP_ADMIN_USER: ${FEDERATED_IDP_ADMIN_USER:-}
+      FEDERATED_IDP_ADMIN_PASSWORD: ${FEDERATED_IDP_ADMIN_PASSWORD:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+      business-api:
+        condition: service_healthy
+      ai-agent:
+        condition: service_healthy
+    ports:
+      - "5001:5001"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:5001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+volumes:
+  teamspace-data:

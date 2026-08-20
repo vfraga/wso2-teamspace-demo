@@ -1,11 +1,14 @@
 import json
 import logging
-import sys
+import os
+import threading
+import time
+from contextlib import asynccontextmanager, contextmanager
 import secrets
 
 import httpx
 import jwt
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
@@ -13,27 +16,33 @@ from google.genai import errors
 from starlette.responses import Response
 from mcp.server.sse import SseServerTransport
 
+from common import rate_limit
+from common.jwt_validation import token_issuer
+from common.logging_setup import configure_logging, is_production
+from common.m2m_auth import SERVICE_AUTH_HEADER, make_service_auth_dependency
+from common.safe_auth_logger import mask_token
 from agent.config import settings
 from agent.gemini_agent import run_agent, run_agent_stream
 from agent.auth_manager import AuthManager
 from agent.state_manager import StateManager, FlowState, FrontendState
 from agent.chat_history import ChatHistoryManager
+from agent.store import get_store
 from agent.schemas import ChatRequest, ChatResponse
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-    stream=sys.stdout,
-)
-
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
-logging.getLogger("google").setLevel(logging.INFO)
+configure_logging("AI Agent")
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Teamspace AI Agent", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Build the state store at startup rather than on first chat request, so
+    # the operator sees which backend is live (and a bad REDIS_URL surfaces
+    # immediately) instead of discovering it mid-conversation.
+    get_store()
+    yield
+
+
+app = FastAPI(title="Teamspace AI Agent", version="1.0.0", lifespan=lifespan)
 
 
 from common.fastapi_errors import handle_validation_error, handle_global_error
@@ -49,14 +58,23 @@ async def global_exception_handler(request, exc: Exception):
     return await handle_global_error(request, exc, logger, "AI Agent")
 
 
+# Rate limiting on the endpoints that cost money (Gemini) or drive WSO2 IS.
+# These are FastAPI dependencies rather than decorators so they can be ordered
+# ahead of require_service_auth — see the note in common/rate_limit.py.
+chat_rate_limit = rate_limit.rate_limit_dependency("CHAT_LIMIT")
+auth_rate_limit = rate_limit.rate_limit_dependency("AUTH_LIMIT")
+default_rate_limit = rate_limit.rate_limit_dependency("DEFAULT_LIMIT")
+logger.info("AI Agent %s", rate_limit.describe())
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # Only the methods this service actually serves, and only the headers its
+    # callers actually send — rather than the previous "*" for both.
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", SERVICE_AUTH_HEADER],
 )
 
-from typing import Optional
 
 class ChatHistoryManagerProxy:
     def __getattr__(self, name):
@@ -65,16 +83,65 @@ class ChatHistoryManagerProxy:
 chat_history = ChatHistoryManagerProxy()
 
 
-def require_internal_secret(x_internal_secret: Optional[str] = Header(None)) -> None:
-    # Fail-closed: agent/config.py generates a random secret if AGENT_INTERNAL_SECRET
-    # is unset, so settings.INTERNAL_SECRET is always truthy in normal operation. The
-    # outer `if settings.INTERNAL_SECRET:` guard remains a defensive belt-and-braces
-    # check — if it ever becomes falsy, we fall through and treat the request as
-    # unauthorised (returns None, so the endpoint still executes but cannot be hit
-    # by an unknown client because every caller must present the rotating secret).
-    if settings.INTERNAL_SECRET:
-        if not x_internal_secret or x_internal_secret != settings.INTERNAL_SECRET:
-            raise HTTPException(status_code=403, detail="Forbidden")
+#: Lifetime of the OAuth `state` JWT and its paired `oauth_session` cookie.
+#: They must match: the cookie is the second CSRF factor, so a state that
+#: outlives its cookie would be verifiable with the factor missing. Short by
+#: design — this window only has to cover the WSO2 consent screen.
+OAUTH_STATE_TTL_SECONDS = 300
+
+#: Ceiling on simultaneously-open MCP SSE streams. Each /mcp/sse request holds
+#: a connection open for its lifetime, so without a cap the endpoint is an
+#: unauthenticated way to exhaust workers.
+MAX_MCP_SSE_STREAMS = int(os.getenv("MAX_MCP_SSE_STREAMS", "32"))
+
+_mcp_sse_streams = 0
+_mcp_sse_lock = threading.Lock()
+
+
+@contextmanager
+def _mcp_sse_slot():
+    """Reserve a stream slot, or raise HTTP 503 when the cap is reached."""
+    global _mcp_sse_streams
+    with _mcp_sse_lock:
+        if _mcp_sse_streams >= MAX_MCP_SSE_STREAMS:
+            logger.warning(
+                "Refusing MCP SSE connection: %d streams already open (MAX_MCP_SSE_STREAMS)",
+                _mcp_sse_streams,
+            )
+            raise HTTPException(status_code=503, detail="Too many open MCP streams")
+        _mcp_sse_streams += 1
+        current = _mcp_sse_streams
+    logger.debug("MCP SSE streams open: %d/%d", current, MAX_MCP_SSE_STREAMS)
+    try:
+        yield
+    finally:
+        with _mcp_sse_lock:
+            _mcp_sse_streams -= 1
+
+
+def _agent_jwks() -> dict:
+    """JWKS for verifying inbound service tokens.
+
+    Reuses the MCP server's cache rather than adding a third one: its
+    stale-tolerant policy is the right fit here, since an IS blip should not
+    break a chat session that is already in flight. Imported lazily to keep
+    the module import order unchanged.
+    """
+    from agent.mcp_server import get_jwks
+
+    return get_jwks()
+
+
+# Inbound M2M authentication, from the same factory the Business API uses, so
+# the two services cannot drift apart. Unlike the shared secret this replaced,
+# a caller now presents a short-lived, scoped, verifiable WSO2 IS token — and
+# an unset credential can no longer leave these endpoints wide open.
+require_service_auth = make_service_auth_dependency(
+    jwks_getter=_agent_jwks,
+    audience_getter=lambda: settings.CLIENT_ID,
+    issuer_getter=lambda: token_issuer(settings.IS_BASE_URL, settings.TENANT_PATH),
+    label="AI Agent",
+)
 
 
 async def _prepare_chat(req: ChatRequest) -> dict:
@@ -85,7 +152,10 @@ async def _prepare_chat(req: ChatRequest) -> dict:
     and records the user message in chat history. Returns a dict with everything
     the response/stream generators need afterwards.
     """
-    logger.info("Chat request: thread=%s, org=%s, message='%s'", req.thread_id, req.org_name, req.message[:100])
+    # Message content is DEBUG, not INFO: fully visible at the demo default
+    # level, but a production deployment on INFO no longer logs what users type.
+    logger.info("Chat request: thread=%s, org=%s, chars=%d", req.thread_id, req.org_name, len(req.message))
+    logger.debug("Chat request content: thread=%s, message='%s'", req.thread_id, req.message[:100])
     state_mgr = StateManager.get_instance()
     if req.org_name:
         state_mgr.set_org_name(req.thread_id, req.org_name)
@@ -168,7 +238,11 @@ def _map_exception_to_user_message(e: Exception, thread_id: str) -> str:
     return "I'm sorry, I encountered an unexpected error while processing your request. Please try again."
 
 
-@app.post("/chat", response_model=ChatResponse, dependencies=[Depends(require_internal_secret)])
+@app.post(
+    "/chat",
+    response_model=ChatResponse,
+    dependencies=[Depends(chat_rate_limit), Depends(require_service_auth)],
+)
 async def chat(req: ChatRequest):
     ctx = await _prepare_chat(req)
     state_mgr = ctx["state_mgr"]
@@ -193,7 +267,8 @@ async def chat(req: ChatRequest):
     metadata = _collect_response_metadata(
         req.thread_id, state_mgr, auth_mgr, ctx["initial_obo_jwt"], ctx["initial_agent_jwt"]
     )
-    logger.info("Chat response: thread=%s, state=%s, response='%s'", req.thread_id, metadata["state"], response_text[:100])
+    logger.info("Chat response: thread=%s, state=%s, chars=%d", req.thread_id, metadata["state"], len(response_text))
+    logger.debug("Chat response content: thread=%s, response='%s'", req.thread_id, response_text[:100])
     return ChatResponse(
         message=response_text,
         state=metadata["state"],
@@ -203,7 +278,10 @@ async def chat(req: ChatRequest):
     )
 
 
-@app.post("/chat/stream", dependencies=[Depends(require_internal_secret)])
+@app.post(
+    "/chat/stream",
+    dependencies=[Depends(chat_rate_limit), Depends(require_service_auth)],
+)
 async def chat_stream(req: ChatRequest):
     ctx = await _prepare_chat(req)
     state_mgr = ctx["state_mgr"]
@@ -238,13 +316,20 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(stream_generator(), media_type="text/plain")
 
 
-@app.get("/authorize")
+@app.get("/authorize", dependencies=[Depends(auth_rate_limit)])
 async def initiate_oauth(request: Request, thread_id: str, action: str):
     logger.info("Initiating secure OBO OAuth: thread_id=%s, action=%s", thread_id, action)
     auth_mgr = AuthManager.get_instance()
     state_mgr = StateManager.get_instance()
 
     agent_id, _ = state_mgr.get_agent_credentials(thread_id)
+    if not agent_id:
+        # No agent credentials for this thread: an expired/unknown thread_id, or
+        # an org with no agent deployed. get_real_wso2_authorization_url would
+        # raise ValueError and surface as a 500 on unauthenticated input.
+        logger.warning("Refusing OBO authorize: no agent credentials for thread=%s", thread_id)
+        return _oauth_error_response("no_agent")
+
     csrf_token = secrets.token_urlsafe(16)
 
     if action == "list":
@@ -259,12 +344,20 @@ async def initiate_oauth(request: Request, thread_id: str, action: str):
         raise HTTPException(status_code=400, detail=f"Unknown action: {action!r}")
 
     # Incorporate thread_id and action directly into a signed state parameter to protect against CSRF stateless-ly
+    # `exp` matters: without it the signed state is a permanent bearer
+    # credential for this thread+action, replayable by anyone who ever observes
+    # it (it travels in the popup's URL and is logged at DEBUG).
+    now = int(time.time())
     state_payload = {
         "thread_id": thread_id,
         "action": action,
         "state": csrf_token,
+        "iat": now,
+        "exp": now + OAUTH_STATE_TTL_SECONDS,
     }
-    secret = settings.INTERNAL_SECRET or settings.CLIENT_SECRET or "default_secret_key_123"
+    secret, secret_error = _resolve_state_secret()
+    if secret_error is not None:
+        return secret_error
     signed_state = jwt.encode(state_payload, secret, algorithm="HS256")
 
     auth_url = auth_mgr.get_real_wso2_authorization_url(
@@ -278,6 +371,8 @@ async def initiate_oauth(request: Request, thread_id: str, action: str):
         "thread_id": thread_id,
         "action": action,
         "state": csrf_token,
+        "iat": now,
+        "exp": now + OAUTH_STATE_TTL_SECONDS,
     }
     token = jwt.encode(cookie_payload, secret, algorithm="HS256")
 
@@ -291,28 +386,40 @@ async def initiate_oauth(request: Request, thread_id: str, action: str):
         samesite="lax",
         secure=is_secure,
         path="/callback",
-        max_age=300,
+        max_age=OAUTH_STATE_TTL_SECONDS,
     )
     return response
 
 
-@app.get("/callback")
+@app.get("/callback", dependencies=[Depends(auth_rate_limit)])
 async def oauth_callback(request: Request, code: str, state: str):
-    logger.info("OBO callback received: state=%s", state)
+    # Masked only. The state is a CSRF credential, and _decode_signed_state
+    # logs the thread_id/action it resolves — which is the part with teaching
+    # value — a few lines below.
+    logger.info("OBO callback received: state=%s", mask_token(state))
     auth_mgr = AuthManager.get_instance()
     state_mgr = StateManager.get_instance()
 
     cookie_val = request.cookies.get("oauth_session")
-    secret = settings.INTERNAL_SECRET or settings.CLIENT_SECRET or "default_secret_key_123"
+    secret, secret_error = _resolve_state_secret()
+    if secret_error is not None:
+        return secret_error
 
-    thread_id, action, csrf_state = _decode_signed_state(state, secret)
+    thread_id, action, csrf_state, expired = _decode_signed_state(state, secret)
+    if expired:
+        logger.warning("Refusing callback: the signed state JWT has expired")
+        return _oauth_error_response("expired")
 
-    if cookie_val:
+    if thread_id:
+        # A resolved signed state means this is a real flow, so the cookie —
+        # the second CSRF factor — is required. It used to be checked only
+        # `if cookie_val`, which let a caller skip verification by simply not
+        # sending it, leaving the signed state as the only barrier to an
+        # authorization-code injection.
         cookie_error = _verify_oauth_cookie(cookie_val, csrf_state, secret)
         if cookie_error is not None:
             return cookie_error
-
-    if not thread_id:
+    else:
         if not settings.MOCK_LLM:
             logger.error("Refusing callback: no signed state JWT resolved and MOCK_LLM is disabled")
             return _oauth_error_response("invalid_state")
@@ -344,11 +451,27 @@ _OAUTH_ERROR_HTML = {
     "invalid_state": "<html><body><p>Invalid OAuth state. Please close this window and try again.</p></body></html>",
     "invalid_session": "<html><body><p>Invalid OAuth session. Please close this window and try again.</p></body></html>",
     "auth_failed": "<html><body><p>Authorization failed. Please close this window and try again.</p></body></html>",
+    "misconfigured": "<html><body><p>The agent service is not configured to sign OAuth state. Please contact your administrator.</p></body></html>",
+    "expired": "<html><body><p>This authorization request has expired. Please close this window and try again.</p></body></html>",
+    "no_agent": "<html><body><p>This conversation has no AI agent associated with it. Please close this window and start a new chat.</p></body></html>",
 }
 
 
 def _oauth_error_response(kind: str, status_code: int = 400) -> HTMLResponse:
     return HTMLResponse(_OAUTH_ERROR_HTML[kind], status_code=status_code)
+
+
+def _resolve_state_secret() -> tuple[str | None, HTMLResponse | None]:
+    """Resolve the OAuth state signing key, or an error page explaining why not.
+
+    Both /authorize and /callback need this key, and neither should turn a
+    deployment mistake into an unhandled 500 in a popup window.
+    """
+    try:
+        return settings.state_jwt_signing_secret(), None
+    except ValueError as exc:
+        logger.error("OAuth state signing key unavailable: %s", exc)
+        return None, _oauth_error_response("misconfigured", status_code=500)
 
 
 def _action_to_flow_state(action: str) -> FlowState:
@@ -359,22 +482,37 @@ def _action_to_flow_state(action: str) -> FlowState:
     }.get(action, FlowState.BOOKING_AUTHORIZED)
 
 
-def _decode_signed_state(state: str, secret: str) -> tuple[str | None, str | None, str | None]:
+def _decode_signed_state(state: str, secret: str) -> tuple[str | None, str | None, str | None, bool]:
+    """Decode the signed state. Returns (thread_id, action, csrf, expired).
+
+    `expired` is reported separately from a decode failure so the user gets
+    "this authorization expired, start again" rather than the generic invalid
+    state page — an expired state is the expected outcome of leaving the WSO2
+    consent screen open, not an attack.
+    """
     try:
         payload = jwt.decode(state, secret, algorithms=["HS256"])
         thread_id = payload.get("thread_id")
         action = payload.get("action")
         csrf_state = payload.get("state")
         logger.info("Resolved thread_id=%s, action=%s from signed state parameter", thread_id, action)
-        return thread_id, action, csrf_state
+        return thread_id, action, csrf_state, False
+    except jwt.ExpiredSignatureError:
+        return None, None, None, True
     except Exception as e:
         logger.info("Failed to decode state parameter as signed JWT (this is normal for tests/mock triggers): %s", e)
-        return None, None, None
+        return None, None, None, False
 
 
-def _verify_oauth_cookie(cookie_val: str, csrf_state: str | None, secret: str) -> HTMLResponse | None:
+def _verify_oauth_cookie(cookie_val: str | None, csrf_state: str | None, secret: str) -> HTMLResponse | None:
+    if not cookie_val:
+        logger.warning("Refusing callback: the oauth_session CSRF cookie is missing")
+        return _oauth_error_response("invalid_session")
     try:
         cookie_payload = jwt.decode(cookie_val, secret, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        logger.warning("Refusing callback: the oauth_session cookie has expired")
+        return _oauth_error_response("expired")
     except Exception:
         logger.exception("Failed to decode oauth_session cookie")
         return _oauth_error_response("invalid_session")
@@ -409,18 +547,30 @@ async def _complete_obo_authorization(auth_mgr, thread_id: str, code: str, state
     return None
 
 
-@app.get("/state/{thread_id}", dependencies=[Depends(require_internal_secret)])
+@app.get("/state/{thread_id}", dependencies=[Depends(default_rate_limit), Depends(require_service_auth)])
 async def get_state(thread_id: str):
+    """Frontend state for a chat thread.
+
+    The raw OBO and agent JWTs feed the portal's JWT inspector panel, which is
+    a core part of the demo — watching the delegated token appear is the point.
+    They are still bearer tokens, though, and any holder of a service token can
+    ask for any thread, so they are withheld in production: a demo affordance
+    should not become a token-exfiltration endpoint on a real deployment.
+    """
     state_mgr = StateManager.get_instance()
     auth_mgr = AuthManager.get_instance()
-    return {
-        "state": state_mgr.get_frontend_state(thread_id).value,
-        "obo_jwt": auth_mgr.get_obo_jwt_raw(thread_id),
-        "agent_jwt": auth_mgr.get_agent_jwt_raw(thread_id),
-    }
+    payload = {"state": state_mgr.get_frontend_state(thread_id).value}
+    if is_production():
+        payload["obo_jwt"] = None
+        payload["agent_jwt"] = None
+        payload["tokens_withheld"] = True
+    else:
+        payload["obo_jwt"] = auth_mgr.get_obo_jwt_raw(thread_id)
+        payload["agent_jwt"] = auth_mgr.get_agent_jwt_raw(thread_id)
+    return payload
 
 
-@app.post("/agent-token", dependencies=[Depends(require_internal_secret)])
+@app.post("/agent-token", dependencies=[Depends(default_rate_limit), Depends(require_service_auth)])
 async def create_agent_token():
     """Authenticate the agent with its own credentials (for demo purposes)."""
     auth_mgr = AuthManager.get_instance()
@@ -432,7 +582,7 @@ async def create_agent_token():
 mcp_transport = SseServerTransport("/mcp/messages/")
 
 
-@app.get("/mcp/sse")
+@app.get("/mcp/sse", dependencies=[Depends(default_rate_limit)])
 async def handle_mcp_sse(request: Request):
     """Establishes persistent Server-Sent Events stream for MCP."""
     logger.info("MCP Client connection requested at /mcp/sse")
@@ -441,32 +591,42 @@ async def handle_mcp_sse(request: Request):
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
     else:
-        # Support clients (like standard browser EventSources) that cannot easily send headers
+        # Fallback for browser EventSource, which genuinely cannot set headers.
+        # A token in a query string lands in access logs, browser history and
+        # Referer headers, so prefer the Authorization header wherever the
+        # client can send one. See the SECURITY note in agent/mcp_server.py.
         token = request.query_params.get("token") or request.query_params.get("access_token") or ""
+        if token:
+            logger.debug("MCP token supplied via query parameter (no Authorization header)")
 
     from agent.mcp_server import mcp_server, mcp_token_ctx
-    ctx_token = mcp_token_ctx.set(token)
-    try:
-        async with mcp_transport.connect_sse(
-            request.scope,
-            request.receive,
-            request._send
-        ) as streams:
-            logger.info("MCP Server stream connected, running event loop")
-            await mcp_server.run(
-                streams[0],
-                streams[1],
-                mcp_server.create_initialization_options()
-            )
-    except Exception:
-        logger.exception("MCP Server stream encountered an error")
-    finally:
-        mcp_token_ctx.reset(ctx_token)
-        logger.info("MCP Client connection closed")
+
+    # Reserve the slot before anything else, so a rejected connection is a
+    # clean 503 rather than a half-initialised stream. Raising out of here
+    # deliberately escapes the try/except below, which swallows exceptions.
+    with _mcp_sse_slot():
+        ctx_token = mcp_token_ctx.set(token)
+        try:
+            async with mcp_transport.connect_sse(
+                request.scope,
+                request.receive,
+                request._send
+            ) as streams:
+                logger.info("MCP Server stream connected, running event loop")
+                await mcp_server.run(
+                    streams[0],
+                    streams[1],
+                    mcp_server.create_initialization_options()
+                )
+        except Exception:
+            logger.exception("MCP Server stream encountered an error")
+        finally:
+            mcp_token_ctx.reset(ctx_token)
+            logger.info("MCP Client connection closed")
     return Response()
 
 
-@app.post("/mcp/messages/")
+@app.post("/mcp/messages/", dependencies=[Depends(default_rate_limit)])
 async def handle_mcp_messages(request: Request):
     """Receives JSON-RPC messages from the MCP Client."""
     token = ""
@@ -485,7 +645,7 @@ async def handle_mcp_messages(request: Request):
         mcp_token_ctx.reset(ctx_token)
 
 
-@app.post("/clear/{thread_id}", dependencies=[Depends(require_internal_secret)])
+@app.post("/clear/{thread_id}", dependencies=[Depends(default_rate_limit), Depends(require_service_auth)])
 async def clear_thread(thread_id: str):
     logger.debug("Clearing state and tokens for thread=%s", thread_id)
     auth_mgr = AuthManager.get_instance()

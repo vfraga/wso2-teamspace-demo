@@ -1,12 +1,15 @@
 import logging
 import os
-import sys
 
 import requests
 from cachelib.file import FileSystemCache
 from flask import Flask, Response, request, redirect, session, render_template
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from typing import Any
 
+from common import rate_limit
+from common.logging_setup import configure_logging
 from webapp.config import Config
 from webapp.auth import init_oauth
 from webapp.blueprints import main, dashboard, admin, personalization, signup, subscription, chat, agents
@@ -43,9 +46,9 @@ def _populate_agent_availability_in_session(org_id: str) -> None:
     """
     if not org_id or "has_agent_config" in session:
         return
-    from webapp.api_proxy import get_agent_config_via_internal_secret
+    from webapp.api_proxy import get_agent_config_via_service_token
     try:
-        session["has_agent_config"] = bool(get_agent_config_via_internal_secret(org_id))
+        session["has_agent_config"] = bool(get_agent_config_via_service_token(org_id))
     except requests.RequestException:
         logger.warning("agent-config lookup failed (transient), will retry")
         logger.debug("agent-config transient failure trace", exc_info=True)
@@ -54,25 +57,77 @@ def _populate_agent_availability_in_session(org_id: str) -> None:
         session["has_agent_config"] = False
 
 
-def create_app() -> Flask:
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-        stream=sys.stdout,
+def _configure_rate_limiting(app: Flask) -> Limiter:
+    """Attach the portal's rate limiter and limit the chat blueprint.
+
+    Only the chat routes carry an explicit limit — they proxy to the agent and
+    therefore to Gemini. Everything else is left unlimited so browsing the demo
+    cannot trip a 429. Storage matches the rest of the stack: Redis when
+    REDIS_URL is set, in-process memory otherwise.
+
+    The limit is applied to the blueprint object (which Flask-Limiter supports)
+    before it is registered, so it covers every route the blueprint adds
+    without each one needing a decorator.
+    """
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        storage_uri=rate_limit.storage_uri(),
+        enabled=rate_limit.ENABLED,
+        default_limits=[rate_limit.DEFAULT_LIMIT] if rate_limit.DEFAULT_LIMIT else [],
     )
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("authlib").setLevel(logging.INFO)
-    logging.getLogger("werkzeug").setLevel(logging.INFO)
+    limiter.limit(rate_limit.CHAT_LIMIT)(chat.bp)
+    logger.info("Web Portal %s", rate_limit.describe())
+    return limiter
+
+
+def _configure_session_backend(app: Flask) -> None:
+    """Select the session store: Redis when configured, filesystem otherwise.
+
+    Filesystem sessions (`flask_session/` via cachelib) are per-instance, so a
+    user bounced between gunicorn workers behind a load balancer loses their
+    login. Reuses the same REDIS_URL as the agent's state store, so one setting
+    makes the whole stack multi-instance capable.
+    """
+    redis_url = os.getenv("REDIS_URL", "").strip()
+    if redis_url:
+        try:
+            import redis
+
+            client = redis.Redis.from_url(redis_url)
+            client.ping()
+        except ImportError:
+            logger.error(
+                "REDIS_URL is set but the redis package is not installed; falling back "
+                "to filesystem sessions. Install the extra with `uv sync --extra redis`."
+            )
+        except Exception:
+            logger.exception(
+                "REDIS_URL is set but Redis is unreachable; falling back to filesystem "
+                "sessions. Sessions will not be shared across instances."
+            )
+        else:
+            app.config["SESSION_TYPE"] = "redis"
+            app.config["SESSION_REDIS"] = client
+            app.config["SESSION_KEY_PREFIX"] = os.getenv("REDIS_KEY_PREFIX", "") + "teamspace:session:"
+            logger.info("Session store: Redis (shared across instances)")
+            return
+
+    app.config["SESSION_TYPE"] = "cachelib"
+    app.config["SESSION_CACHELIB"] = FileSystemCache(
+        cache_dir=os.path.join(os.path.dirname(__file__), "..", "flask_session"),
+        threshold=500,
+    )
+    logger.info("Session store: filesystem (set REDIS_URL to share across instances)")
+
+
+def create_app() -> Flask:
+    configure_logging("Web Portal")
 
     app = Flask(__name__)
     app.config.from_object(Config)
     
-    # Lazily initialize FileSystemCache and compute TENANT_PATH at runtime
-    app.config["SESSION_CACHELIB"] = FileSystemCache(
-        cache_dir=os.path.join(os.path.dirname(__file__), "..", "flask_session"),
-        threshold=500
-    )
+    _configure_session_backend(app)
     is_org_handle = app.config.get("IS_ORG_HANDLE", "")
     app.config["TENANT_PATH"] = f"/t/{is_org_handle}" if is_org_handle else ""
     app.config["OIDC_REDIRECT_URI"] = f"http://{Config.FLASK_HOST}:{Config.FLASK_PORT}/callback"
@@ -82,6 +137,7 @@ def create_app() -> Flask:
 
     from flask_session import Session
     Session(app)
+    _configure_rate_limiting(app)
     init_translations(app)
     init_oauth(app)
 

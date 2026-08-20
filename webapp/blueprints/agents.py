@@ -6,11 +6,10 @@ from webapp.utils.decorators import login_required, admin_required
 from webapp.utils.roles import TEAMSPACE_ADMIN
 from webapp.is_client import ISClient
 from webapp.auth import get_agent_management_token
-from webapp.api_proxy import get_agent_config, save_agent_config, delete_agent_config, get_organization_plan
+from webapp.api_proxy import get_agent_config, save_agent_config, delete_agent_config, resolve_plan_for_gating
 from webapp.is_operations import assign_roles_to_user
 from webapp.utils.roles import TEAMSPACE_USER
 from webapp.auth import get_root_role_management_token
-from common.constants import DEFAULT_PLAN
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +17,43 @@ bp = Blueprint("agents", __name__)
 
 
 def _check_plan_and_role(required_plan: str, required_role: str, title: str, description: str, upgrade_template: str):
+    """Gate a feature on the org's plan and the user's role.
+
+    Both the plan and the role must hold, and the plan is checked first. It used
+    to be consulted only *after* the role check had failed, so `required_plan`
+    was never compared at all: any user holding `required_role` reached the
+    feature whatever their org's plan.
+
+    The role alone is not a safe proxy for the plan. `PLAN_ROLES` grants
+    `idp-manager` and the branding-editor roles on upgrade
+    (`webapp/blueprints/subscription.py`), but that handler never *revokes* them
+    and happily accepts a downgrade, so an org that drops from enterprise to
+    basic keeps every role its old plan granted.
+
+    The plan can also be *unknown* — `resolve_plan_for_gating` returns None when
+    the Business API is unreachable, rather than reporting a default that would
+    silently revoke paid features during an outage. The three-way outcome:
+
+    * plan says no        -> upgrade prompt (this closes the stale-role bypass)
+    * plan says yes       -> role decides; a missing role is an honest
+                             "you need this role" rather than "upgrade"
+    * plan unknown        -> don't punish a paying customer for an outage: allow
+                             if the role is present, otherwise fall back to the
+                             upgrade prompt, which is what this case showed
+                             before and remains the likelier explanation
+    
+    Returns a response to short-circuit with, or None to allow.
+    """
     org_handle = request.view_args.get("org_handle") if request.view_args else None
     org_id = session.get("user", {}).get("org_id", "")
     user_roles = session.get("user_roles", [])
 
+    org_plan = resolve_plan_for_gating(org_id)
+    if org_plan is not None and org_plan != required_plan:
+        return render_template(upgrade_template, org_handle=org_handle)
+
     if required_role not in user_roles:
-        plan_info = get_organization_plan(org_id)
-        org_plan = plan_info.get("plan", DEFAULT_PLAN)
-        if org_plan == "enterprise":
+        if org_plan == required_plan:
             return render_template(
                 "admin/access_denied.html",
                 org_handle=org_handle,
@@ -33,7 +61,17 @@ def _check_plan_and_role(required_plan: str, required_role: str, title: str, des
                 description=description,
                 required_role=required_role,
             )
+        logger.warning(
+            "Plan unknown for org=%s and role %s absent; showing the upgrade prompt for %s",
+            org_id, required_role, title,
+        )
         return render_template(upgrade_template, org_handle=org_handle)
+
+    if org_plan is None:
+        logger.warning(
+            "Plan unknown for org=%s; allowing %s on the strength of the %s role alone",
+            org_id, title, required_role,
+        )
     return None
 
 

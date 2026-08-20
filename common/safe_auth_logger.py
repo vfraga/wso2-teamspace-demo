@@ -76,3 +76,93 @@ class SafeAuthLogger:
             "%s (grant=%s, thread=%s, data_type=%s)",
             prefix, grant_type, thread_id or "-", type(response_or_data).__name__,
         )
+
+
+# ---------------------------------------------------------------------------
+# Claim-summary logging
+#
+# The demo *wants* token claims visible — watching `sub`, `scope` and `act`
+# change across a token exchange is the point of the walkthrough. What it does
+# not want is `json.dumps(decoded)` of an entire attacker-supplied payload on
+# every authenticated call. `format_claims` is the middle ground: the claims
+# that teach, with the identifying values shortened and the personal ones
+# masked, and everything else reduced to a count.
+# ---------------------------------------------------------------------------
+
+# Claims rendered explicitly by `format_claims`; anything else is counted only.
+_SUMMARISED_CLAIMS = frozenset({
+    "sub", "org_id", "user_org", "email", "scope", "act", "aut",
+})
+
+
+def mask_token(token: str, visible: int = 10) -> str:
+    """Shorten a token-shaped value to `visible` leading chars plus its tail.
+
+    Short values are returned unchanged — there is nothing to hide in a value
+    too small to be a real credential.
+    """
+    if not token or len(token) <= visible:
+        return token
+    return token[:visible] + "..." + token[-4:]
+
+
+def shorten_id(value: str, visible: int = 8) -> str:
+    """Shorten an opaque identifier (a `sub`, an `act.sub`) for correlation.
+
+    Keeps enough of the prefix to match log lines against each other without
+    reproducing the whole identifier.
+    """
+    if not value:
+        return "-"
+    if len(value) <= visible:
+        return value
+    return f"{value[:visible]}…"
+
+
+def mask_email(email: str) -> str:
+    """Mask an email address to its first character and domain initial.
+
+    `jane@worklink.com` -> `j***@w***.com`. Enough to tell two users apart in
+    a demo log; not enough to harvest.
+    """
+    if not email or "@" not in email:
+        return "-" if not email else "***"
+    local, _, domain = email.partition("@")
+    domain_head, dot, tld = domain.partition(".")
+    masked_domain = f"{domain_head[:1]}***" if domain_head else "***"
+    if dot:
+        masked_domain = f"{masked_domain}.{tld}"
+    return f"{local[:1]}***@{masked_domain}"
+
+
+def format_claims(decoded: dict) -> str:
+    """Render a decoded JWT as a one-line, masked claim summary.
+
+    Shows the claims that make the identity flow legible — subject,
+    organisation, auth type, granted scopes, and the RFC 8693 `act` actor —
+    and never the raw token, the full payload, or a plaintext email.
+    """
+    if not isinstance(decoded, dict):
+        return "<no claims>"
+
+    org = decoded.get("org_id", "") or decoded.get("user_org", "") or "-"
+    scope = decoded.get("scope", "")
+    scopes = scope.split() if isinstance(scope, str) else list(scope or [])
+    act = decoded.get("act") or {}
+    actor = act.get("sub", "") if isinstance(act, dict) else ""
+
+    parts = [
+        f"sub={shorten_id(str(decoded.get('sub', '')))}",
+        f"org={org}",
+        f"aut={decoded.get('aut', '-')}",
+        f"scope=[{','.join(scopes)}]",
+    ]
+    if actor:
+        parts.append(f"act.sub={shorten_id(str(actor))}")
+    if decoded.get("email"):
+        parts.append(f"email={mask_email(str(decoded['email']))}")
+
+    extra = len([k for k in decoded if k not in _SUMMARISED_CLAIMS])
+    if extra:
+        parts.append(f"(+{extra} more claims)")
+    return " ".join(parts)

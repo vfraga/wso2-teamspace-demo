@@ -22,12 +22,41 @@ dependencies = [
     "httpx>=0.28",
     "google-genai>=2.8",
     "markdown>=3.10",
-    "mcp>=0.1.0",
+    # Pinned below 2.0: mcp 2.x replaced the `Server.list_tools()` decorator API
+    # that agent/mcp_server.py is built on. 1.28.1 is the floor because earlier
+    # 1.x is affected by PYSEC-2026-3483. Migrating to the 2.x API is its own
+    # piece of work, not a dependency bump.
+    "mcp>=1.28.1,<2",
+    # Production WSGI/ASGI server. start.sh uses it only when
+    # SERVE_MODE=production; the default demo path still uses flask run +
+    # single-process uvicorn.
+    "gunicorn>=23",
+    # Schema migrations for the Business API. Base.metadata.create_all remains
+    # the zero-config path for the demo (DB_AUTO_CREATE); Alembic is what a real
+    # deployment uses so schema changes can be applied to an existing database.
+    "alembic>=1.13",
+    # Rate limiting. Both default to in-memory storage so the demo needs no
+    # extra infrastructure, and use REDIS_URL when it is set.
+    "flask-limiter>=3.8",
+    # Used directly by common/rate_limit.py for the FastAPI services, so it is
+    # declared rather than relied on as a flask-limiter transitive.
+    "limits>=3.0",
 ]
 
 
 [project.optional-dependencies]
+# Shared state for the agent, so it can run more than one instance. Optional:
+# without it the agent uses its in-process store and the demo works unchanged.
+redis = [
+    "redis>=5",
+]
+# Postgres driver for the Business API. DATABASE_URL accepts any SQLAlchemy
+# URL; this extra supplies the driver for postgresql+psycopg://.
+postgres = [
+    "psycopg[binary]>=3.2",
+]
 dev = [
+    "redis>=5",
     "pytest>=8.0",
     "pytest-asyncio>=1.4",
     "pytest-mock>=3.12",

@@ -17,30 +17,43 @@ load_dotenv()
 
 # Temporary file-based SQLite for testing to avoid in-memory multi-connection issues
 TEST_DB_FILE = "test_teamspace.db"
-TEST_DATABASE_URL = f"sqlite:///{TEST_DB_FILE}"
+# Override to run the integration suite against another backend, e.g.
+#   TEST_DATABASE_URL=postgresql+psycopg://postgres:pg@127.0.0.1:5432/teamspace
+# DATABASE_URL accepts any SQLAlchemy URL in production, so the suite should be
+# runnable against the same backends rather than only the SQLite default.
+TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", f"sqlite:///{TEST_DB_FILE}")
+TEST_DB_IS_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
 
 @pytest.fixture(name="db_session")
 def db_session_fixture():
     # Remove old test DB if it exists
-    if os.path.exists(TEST_DB_FILE):
+    if TEST_DB_IS_SQLITE and os.path.exists(TEST_DB_FILE):
         try:
             os.remove(TEST_DB_FILE)
         except Exception:
             pass
-            
-    engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
+
+    # check_same_thread is SQLite-only; passing it to psycopg is a TypeError.
+    connect_args = {"check_same_thread": False} if TEST_DB_IS_SQLITE else {}
+    engine = create_engine(TEST_DATABASE_URL, connect_args=connect_args)
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    
-    # Create tables
+
+    # Start from a clean schema. On a file-backed SQLite DB the file was just
+    # deleted; on a shared server the tables may be left over from a prior run.
+    if not TEST_DB_IS_SQLITE:
+        Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
-    
+
     db = TestingSessionLocal()
     try:
         yield db
     finally:
         db.close()
+        if not TEST_DB_IS_SQLITE:
+            Base.metadata.drop_all(bind=engine)
+        engine.dispose()
         # Clean up database file
-        if os.path.exists(TEST_DB_FILE):
+        if TEST_DB_IS_SQLITE and os.path.exists(TEST_DB_FILE):
             try:
                 os.remove(TEST_DB_FILE)
             except Exception:
@@ -455,7 +468,10 @@ def live_server_env():
         "IS_ORG_HANDLE": "teamspace",
         "DATABASE_URL": f"sqlite:///{db_file}",
         "FLASK_SECRET_KEY": "live-test-secret-key-xyz",
-        "AGENT_INTERNAL_SECRET": "live-test-secret-key-xyz",
+        # HMAC key for the agent's OAuth state JWT. Service-to-service auth no
+        # longer uses a shared secret — the services mint client-credentials
+        # tokens from CLIENT_ID/CLIENT_SECRET above.
+        "AGENT_STATE_SIGNING_SECRET": "live-test-state-signing-key-xyz",
         "AGENT_REDIRECT_URI": "http://localhost:8000/callback",
         "BUSINESS_API_URL": "http://localhost:9091",
         "AGENT_SERVICE_URL": "http://localhost:8000",

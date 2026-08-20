@@ -35,6 +35,8 @@ graph TD
         AIAgent <--> Gemini[Google Gemini LLM]
         AIAgent <--> WSO2
         BizAPI <--> SQL[(SQLite DB: teamspace.db)]
+        AIAgent <-.optional.-> Redis[(Redis: shared OBO state)]
+        WebApp <-.optional.-> Redis
     end
     
     BizAPI <--> WSO2
@@ -49,7 +51,8 @@ graph TD
    - Entry point: `webapp.app:create_app` (application factory).
 
 2. **`api/` (FastAPI Business API — Port `9091`)**:
-   - The core business backend. Persists meetings, agent configurations, and organization data to a local SQLite database (`teamspace.db`) via SQLAlchemy.
+   - The core business backend. Persists meetings, agent configurations, and organization data via SQLAlchemy — SQLite (`teamspace.db`) by default, any SQLAlchemy URL via `DATABASE_URL` (the Postgres path is covered by its own CI job).
+   - Schema is owned by **Alembic** (`migrations/`); `alembic upgrade head` applies it. Auto-creation on startup remains as a zero-config convenience outside production (`DB_AUTO_CREATE`).
    - Restricts operations using fine-grained OAuth 2.0 scopes (`list_meetings`, `create_meeting`, `update_meeting`, `delete_meeting`, etc.).
    - Validates JWT tokens issued by WSO2 IS, including checking for nested actor claims (`act`) in On-Behalf-Of scenarios.
    - Routers are mounted under `/meetings`, `/personalization`, `/agent-config`, and `/plans`. Entry point: `api.main:app`.
@@ -58,12 +61,22 @@ graph TD
    - The intelligent core utilizing the **Google Gemini API** (model `gemini-flash-latest`, via the `google-genai` SDK).
    - Acts as the **Worklink Assistant** which schedules and manages meetings on behalf of authorized corporate users.
    - Orchestrates the **OAuth 2.0 On-Behalf-Of (OBO) flow**: builds the WSO2 authorization URL, exchanges the returned authorization code for an OBO access token via RFC 8693 token exchange, and uses that delegated token to call the Business API.
+   - Keeps per-thread OBO state (PKCE verifier, delegated tokens, chat history) behind a pluggable store (`agent/store.py`): in-process by default, Redis when `REDIS_URL` is set. This is what allows more than one agent instance — `/authorize` and `/callback` are different processes under gunicorn.
    - Also hosts the **MCP server** (see below). Entry point: `agent.main:app`.
 
 4. **`common/` (Shared library)**:
-   - Centralised config defaults and one-shot `.env` loading (`common/config.py`), shared constants (`common/constants.py`), FastAPI error handlers, and a credential-masking log helper.
+   - Config defaults and one-shot `.env` loading (`config.py`), shared constants (`constants.py`), FastAPI error handlers (`fastapi_errors.py`), and credential masking plus the JWT claim summariser used in logs (`safe_auth_logger.py`).
+   - `logging_setup.py` — the `LOG_LEVEL` resolution shared by all three services.
+   - `jwt_validation.py` — the RS256/JWKS verification primitives. Deliberately one copy: the Business API, the MCP server and the M2M path all decode through it, so none can drift to weaker checks.
+   - `m2m_auth.py` — OAuth 2.0 client-credentials tokens for service-to-service calls, both the client and the receiving FastAPI dependency.
+   - `rate_limit.py` — shared limit configuration and the FastAPI enforcement dependency.
 
-5. **`tests/` (Test Harness & E2E Suite)**:
+5. **Deployment**:
+   - `Dockerfile` — one non-root image serving all three services; `docker-compose.yml` selects which per container and adds Redis.
+   - `alembic.ini` / `migrations/` — the Business API's schema history.
+   - `start.sh` / `stop.sh` — local process management; `SERVE_MODE=production` switches from the dev servers to gunicorn.
+
+6. **`tests/` (Test Harness & E2E Suite)**:
    - A testing suite divided into `unit/`, `integration/`, and `e2e/` levels.
    - Features a **Programmatic Lifecycle Orchestrator** (`tests/conftest.py`) which manages ports, spins up dynamic, isolated clones of WSO2 IS inside a temporary folder, bootstraps the servers, configures credentials, and executes headless Playwright E2E flows before clean teardown.
 
@@ -107,6 +120,14 @@ Traditional AI integrations require copying a static API key or granting the AI 
    │                      │                          │                         │ (Authorized!)
    │                      │                          │                         │<───────────
 ```
+
+> [!IMPORTANT]
+> The `state` parameter is a short-lived, HMAC-signed JWT paired with an `oauth_session`
+> cookie, and **both are required** at the callback. They expire together after 5 minutes
+> (`OAUTH_STATE_TTL_SECONDS`), which bounds authorization-code injection: a captured
+> state is useless once it lapses, and useless without the matching cookie. The practical
+> cost is that leaving the WSO2 consent screen open for more than five minutes means
+> starting the authorization again.
 
 ### Decoded OBO Token Structure
 
@@ -177,7 +198,7 @@ cp .env.example .env
 ```
 
 > [!NOTE]
-> The values in `.env.example` are placeholders. At minimum you must fill in `CLIENT_ID`, `CLIENT_SECRET`, and `APP_ID` (generated by `setup_is.py`), `GEMINI_API_KEY`, the shared internal-secret triplet, and the WSO2 admin passwords used by the setup scripts (`IS_SUPER_ADMIN_PASSWORD`, `IS_TENANT_ADMIN_PASSWORD`).
+> The values in `.env.example` are placeholders. At minimum you must fill in `CLIENT_ID`, `CLIENT_SECRET`, and `APP_ID` (generated by `setup_is.py`), `GEMINI_API_KEY`, and the WSO2 admin passwords used by the setup scripts (`IS_SUPER_ADMIN_PASSWORD`, `IS_TENANT_ADMIN_PASSWORD`). Service-to-service auth needs no additional secrets — see *Service-to-Service (M2M) Auth* below.
 
 ### Environment Variables
 
@@ -187,7 +208,7 @@ cp .env.example .env
 | :--- | :--- | :--- |
 | `IS_BASE_URL` | Root URL where WSO2 Identity Server is running. | `https://localhost:9443` |
 | `IS_ORG_HANDLE` | Root B2B tenant handle. Set to `teamspace` for tenant mode; leave empty for `carbon.super`. | *(empty)* |
-| `IS_VERIFY_TLS` | Whether to verify the IS TLS certificate. Set `false` for local dev with self-signed certs. | `true` |
+| `IS_VERIFY_TLS` | Whether to verify the IS TLS certificate. Set `false` for local dev with self-signed certs. Applies to **every** outbound call to WSO2 IS, including OIDC discovery, the token endpoint and the JWKS fetch. | `true` |
 | `WSO2_IS_TEMPLATE_PATH` | Path to a clean, un-bootstrapped WSO2 IS 7.2.0 install. Required **only** for live E2E tests (used for dynamic server cloning). | `/path/to/wso2is-7.2.0.24` |
 
 **OAuth2 Application** (generated by `setup_is.py`)
@@ -198,6 +219,107 @@ cp .env.example .env
 | `CLIENT_SECRET` | OAuth2 Client Secret for the Teamspace portal. | *(empty — from bootstrap)* |
 | `APP_ID` | Application ID of the registered Teamspace app in WSO2 IS. | *(empty — from bootstrap)* |
 | `APP_NAME` | Registered name of the enterprise portal application. | `Teamspace` |
+
+**Plan Gating on Enterprise Features**
+
+The Identity Provider, Login Flow and AI Agents admin pages are gated on the org's
+**plan** and the user's **role** — both, with the plan checked first
+(`webapp/blueprints/admin.py:check_idp_access`, `webapp/blueprints/agents.py:_check_plan_and_role`).
+
+The role alone is not a safe proxy for the plan: `PLAN_ROLES` grants `idp-manager` and
+the branding-editor roles when an org upgrades (`webapp/blueprints/subscription.py`), but
+that handler never *revokes* them and accepts a downgrade — so an org that drops from
+enterprise to basic keeps every role its old plan granted.
+
+Because the plan lookup can fail, the gate is a three-way decision:
+
+| Plan lookup | Role held | Outcome |
+| :--- | :--- | :--- |
+| says the org isn't entitled | either | upgrade prompt |
+| says the org is entitled | yes | allowed |
+| says the org is entitled | no | "you need this role" (not a misleading upgrade prompt) |
+| unknown (Business API unreachable) | yes | allowed — an outage must not revoke paid features |
+| unknown | no | upgrade prompt |
+
+`resolve_plan_for_gating` (`webapp/api_proxy.py`) is what distinguishes "this org has no
+subscription" (HTTP 404 — signup always writes a plan row) from "the Business API is
+unreachable" (5xx). `get_organization_plan` reports both as `basic` and is therefore for
+display only, never for an access decision.
+
+**Serving & Deployment**
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `SERVE_MODE` | `production` makes `start.sh` serve all three services behind gunicorn. Anything else keeps the Flask/uvicorn dev servers. | `development` |
+| `API_WORKERS` / `AGENT_WORKERS` / `WEBAPP_WORKERS` | Gunicorn worker counts in production mode. | `4` each |
+| `DB_AUTO_CREATE` | Whether the Business API creates missing tables at startup. Defaults on outside production so the demo boots against an empty DB; off when `FLASK_ENV=production`, where Alembic owns the schema. | *(see description)* |
+
+> [!IMPORTANT]
+> With `SERVE_MODE=production`, `start.sh` **refuses to start** if `AGENT_WORKERS` is
+> above 1 while `REDIS_URL` is unset. The agent's OBO state would not be shared between
+> workers, so `/authorize` and `/callback` could land on different processes and the
+> consent flow would fail intermittently — a failure worth catching at boot rather than
+> mid-demo.
+
+**Rate Limiting**
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `RATE_LIMIT_ENABLED` | Set `false` to disable rate limiting entirely. | `true` |
+| `RATE_LIMIT_CHAT` | Limit on the chat endpoints — the ones that reach Gemini. | `60/minute` |
+| `RATE_LIMIT_AUTH` | Limit on the agent's `/authorize` and `/callback`. | `120/minute` |
+| `RATE_LIMIT_DEFAULT` | Global backstop on the remaining endpoints. | `600/minute` |
+| `RATE_LIMIT_TRUST_FORWARDED_FOR` | Key limits on the first `X-Forwarded-For` hop instead of the peer address. Enable **only** behind a proxy you control — `docker-compose.yml` sets it, because Docker's NAT would otherwise put every client in one bucket. | `false` |
+| `MAX_MCP_SSE_STREAMS` | Ceiling on simultaneously-open MCP SSE streams on the agent. Each connection is held for its lifetime, so this bounds worker exhaustion. | `32` |
+
+Storage follows `REDIS_URL`: in-process counters without it (so limits are per worker),
+shared counters with it. The defaults are set well above any demo walkthrough so clicking
+through the OBO flow repeatedly never trips them.
+
+> [!NOTE]
+> On the FastAPI services the limits are **dependencies ordered ahead of
+> `require_service_auth`**, not decorators on the handler. FastAPI resolves a route's
+> dependencies before calling its handler, so a decorator-based limit would only ever
+> count requests that had already authenticated — leaving an unauthenticated flood
+> unthrottled. `common/rate_limit.py` explains this; `tests/integration/test_rate_limiting.py`
+> guards the ordering.
+
+**Agent State Store**
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `REDIS_URL` | Redis connection string for the agent's shared state. Unset means an in-process store — fine for the demo, but the agent then cannot run more than one instance. | *(unset — in-memory)* |
+| `REDIS_KEY_PREFIX` | Prefix for the agent's Redis keys, if you share a Redis with other applications. | *(empty)* |
+
+The agent keeps per-thread OBO state behind a pluggable store (`agent/store.py`).
+`InMemoryStore` is the default so the demo needs no extra infrastructure. Setting
+`REDIS_URL` switches to `RedisStore`, which is what lets `/authorize` and `/callback`
+run on different workers — the PKCE verifier, the OBO tokens and the chat history all
+become visible to every instance. Install the extra with `uv sync --extra redis`.
+
+> [!WARNING]
+> With `RedisStore`, **OBO access tokens and per-org agent credentials are at rest in
+> Redis**. Require AUTH and TLS on the connection and keep the TTL short
+> (`agent/store.py:DEFAULT_TTL_SECONDS`, 24h by default). A bad or unreachable
+> `REDIS_URL` logs an error and falls back to in-memory rather than refusing to boot —
+> check the startup line `Agent state store: ...` to confirm which backend is live.
+
+**Observability** (all three services)
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `LOG_LEVEL` | Root log level for every service (`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`). An explicit value always wins. | `DEBUG`, or `INFO` when `FLASK_ENV=production` |
+
+> [!NOTE]
+> **`DEBUG` is the intentional default.** Teamspace exists to let you watch the identity
+> workflow happen — token exchange, OBO state transitions, claim contents — so the local
+> demo stays verbose. Setting `FLASK_ENV=production` drops it to `INFO` without needing
+> `LOG_LEVEL`. Resolution lives in `common/logging_setup.py`.
+>
+> Token claims are logged as a masked one-line summary (`common/safe_auth_logger.py:format_claims`):
+> `sub`/`org`/`aut`/`scope`/`act.sub` stay legible because they are what the demo teaches;
+> the raw token, the full payload, and plaintext emails are never written. User chat
+> message content is `DEBUG`-only, so it is visible in the demo and absent in production.
 
 **Flask Web Portal**
 
@@ -221,19 +343,62 @@ cp .env.example .env
 | `ALLOWED_ORIGINS` | Comma-separated CORS allow-list for the FastAPI services. | `http://localhost:5001` |
 | `MOCK_LLM` | When `true`, the agent runs without calling Gemini (used by tests). | `false` |
 
-**M2M Service-to-Service Secrets** — two logical secrets spread across three variable names (each service names the secret from its own perspective)
+**Service-to-Service (M2M) Auth** — no shared secret to configure
 
-| Variable | Read by | Purpose |
-| :--- | :--- | :--- |
-| `AGENT_INTERNAL_SECRET` | Webapp & Agent | **Secret A** — guards webapp→agent calls (sent as `X-Internal-Secret` to the agent's `/chat`, `/state`, etc.) and HMAC-signs the agent's OAuth `state` JWT. Must be set and stable; if unset the agent generates a random value at startup that the webapp can't know. |
-| `INTERNAL_SECRET` | Business API (`api/config.py`) | **Secret B** — the Business API's copy; `api/auth.py:require_internal_secret` checks the `X-Internal-Secret` header against it. |
-| `BUSINESS_API_INTERNAL_SECRET` | Webapp & Agent | **Secret B (callers' copy)** — presented as `X-Internal-Secret` when the webapp (`api_proxy.py`) and agent (`agent_config_cache.py`) call the Business API, e.g. to fetch an org's agent config so the OBO flow can start for any user (incl. non-admins). |
+The three services authenticate to each other with **OAuth 2.0 client-credentials
+tokens** minted from the `CLIENT_ID` / `CLIENT_SECRET` above and presented in the
+`X-Service-Authorization` header:
+
+| Hop | Endpoints |
+| :--- | :--- |
+| webapp → agent | `/chat`, `/chat/stream`, `/state/{thread_id}`, `/agent-token`, `/clear/{thread_id}` |
+| webapp → Business API | agent-config lookup backing the chat panel |
+| agent → Business API | the agent reading its own organization's config |
+
+The receiver verifies the token exactly as it verifies a user token — RS256 pinned
+against WSO2 IS's JWKS, with audience, issuer and expiry enforced (`common/jwt_validation.py`)
+— and then requires the **`internal_service`** scope (`common/m2m_auth.py`).
+
+`Authorization` is deliberately left for the *end-user* JWT. The Business API's
+`GET /agent-config/org/{org_id}` wants both principals at once: the service as the
+trust gate, the user for the audit line. Separate headers keep them distinct with no
+precedence rules to get wrong, and the same shape works on the webapp→agent hop where
+no user token is sent at all.
 
 > [!IMPORTANT]
-> `INTERNAL_SECRET` and `BUSINESS_API_INTERNAL_SECRET` **must hold the same value** (that's secret B). `AGENT_INTERNAL_SECRET` (secret A) is independent and may differ — though `.env.example` sets all three identical for convenience.
+> `setup_is.py` provisions `internal_service` on a **Teamspace Internal Services**
+> API resource (`urn:teamspace:internal`) authorized with **`policyIdentifier: NO_POLICY`**.
+> This is not optional. WSO2 grants RBAC-policy scopes through a user's roles, and a
+> client-credentials token has no user — so under RBAC the token comes back valid but
+> with an **empty `scope` claim**, and every M2M call 403s. `ServiceTokenClient` detects
+> this case and logs the likely cause rather than passing on a useless token. If you
+> bootstrapped an instance before this change, **re-run `setup_is.py`**.
+
+> [!NOTE]
+> Because `internal_service` is granted to the *application* and to no user role, a
+> user-bearing token can never carry it. The scope is therefore the hard gate; the
+> `aut=APPLICATION` claim is checked as defence-in-depth, and only when present, so a
+> WSO2 build that omits it doesn't break every M2M call.
+
+This replaced a static `X-Internal-Secret` shared secret spread across three env vars
+(`AGENT_INTERNAL_SECRET`, `INTERNAL_SECRET`, `BUSINESS_API_INTERNAL_SECRET`). **None of
+them are read any more** — delete them from an existing `.env`. That scheme had no
+expiry, no per-call scoping and no caller identity: anyone who obtained the value gained
+full trusted-service access, including the ability to start an OBO flow for an arbitrary
+user. Service tokens are short-lived, scoped, and verifiable.
+
+**Agent OAuth State Signing**
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `AGENT_STATE_SIGNING_SECRET` | HMAC key for the `state` JWT in the agent's OBO flow. Must be **stable and shared** across every agent instance — `/authorize` signs it and `/callback` verifies it, which are different processes once more than one worker runs. | falls back to `CLIENT_SECRET` |
 
 > [!WARNING]
-> **This shared-secret scheme is a demo simplification, not a production security pattern.** A static, long-lived symmetric secret sent in a plain `X-Internal-Secret` header has no expiry, no per-call scoping, and no caller-identity binding — anyone who obtains it (via a leaked env var, log line, or an unencrypted hop) gains full trusted-service access, including the ability to start OBO flows for arbitrary users. For production, replace it with a real service-to-service authentication mechanism: **mutual TLS (mTLS)** between services, short-lived **OAuth 2.0 client-credentials tokens** (which the same WSO2 IS can issue and the services can validate like user JWTs), or signed short-lived JWTs — and always over TLS. Treat the header secret here as scaffolding to be removed.
+> This key is **never auto-generated**. A random value would verify only on the instance
+> that signed it, silently breaking the OBO callback under scaling — which is exactly what
+> the previous `AGENT_INTERNAL_SECRET` fallback did. If neither this variable nor
+> `CLIENT_SECRET` is set, the agent refuses to start when `FLASK_ENV=production`, and
+> `/authorize` returns a handled error page otherwise.
 
 **Federated Identity Provider** (optional — for the external-IdP / SSO demo)
 
@@ -352,6 +517,33 @@ You should see all three services live:
 * **Business API (FastAPI)**: `http://localhost:9091`
 * **AI Agent (FastAPI)**: `http://localhost:8000`
 
+#### Serving behind gunicorn
+
+`SERVE_MODE=production` swaps the development servers for gunicorn (with uvicorn workers
+for the two FastAPI services). Pair it with `REDIS_URL` so the agent can run more than
+one worker:
+
+```bash
+SERVE_MODE=production REDIS_URL=redis://localhost:6379/0 bash start.sh
+```
+
+Without `REDIS_URL` the script refuses to start a multi-worker agent, because the OBO
+consent callback would land on workers that never saw `/authorize`. Set
+`AGENT_WORKERS=1` if you want production serving on a single agent instance.
+
+#### Running in containers
+
+`docker-compose.yml` brings up the three services plus Redis, all in production mode:
+
+```bash
+docker compose run --rm business-api alembic upgrade head   # first time only
+docker compose up --build
+```
+
+WSO2 IS is deliberately **not** containerised — it is provisioned out-of-band by
+`setup_is.py` against an install you control, so compose consumes it via `IS_BASE_URL`
+(defaulting to `https://host.docker.internal:9443` for a WSO2 IS running on the host).
+
 ---
 
 ### Step 4: Access the Portal
@@ -397,7 +589,7 @@ Test dependencies live in the `dev` (and `test`) optional-dependency groups. The
 
 ### 1. Unit & Integration Tests (Offline)
 
-These run completely offline and do not require WSO2 IS to be active. They validate schemas, database helpers, JWT parsing, scope enforcement, masking, and helper logic:
+These run completely offline and do not require WSO2 IS to be active. They validate schemas, database helpers, JWT parsing and verification, scope enforcement, masking, and helper logic — plus the M2M service-token exchange (end to end against a WSO2-shaped token endpoint on a loopback port), the agent state store against both backends, OBO state/CSRF handling, rate-limit enforcement, plan gating, `id_token` verification, and log-level resolution:
 
 ```bash
 .venv/bin/pytest tests/unit/ -v
@@ -437,9 +629,9 @@ ruff check .
 
 ### Continuous Integration
 
-`.github/workflows/ci.yml` runs on every push and pull request against `main`: `ruff check .`, then the unit and integration suites (138 tests) on Python 3.10 and 3.12. Both are hermetic — no WSO2 IS, no Gemini key, no browser. Dependencies are installed from the lockfile with `uv sync --frozen --extra dev`.
+`.github/workflows/ci.yml` runs on every push and pull request against `main`: `ruff check .`; a security job (`pip-audit` over the locked runtime dependencies, `bandit` at medium severity and above); the integration suite against a real **Postgres** service container with migrations applied; then the unit and integration suites (327 tests) on Python 3.10 and 3.12. Both are hermetic — no WSO2 IS, no Gemini key, no browser. Dependencies are installed from the lockfile with `uv sync --frozen --extra dev`.
 
-The browser-driven suite lives in `.github/workflows/e2e.yml` and is `workflow_dispatch` only. It runs the mocked Playwright scenarios (`tests/e2e/test_e2e_mocked.py`), which are self-contained but currently have three failing cases; the header comment in that workflow records what each one is. The `live` tests stay out of CI entirely — a hosted runner has no WSO2 IS install to clone.
+The browser-driven suite lives in `.github/workflows/e2e.yml` and now also runs on every push and pull request against `main`. It executes the mocked Playwright scenarios (`tests/e2e/test_e2e_mocked.py`), which are self-contained — a mock WSO2 IS alongside the real Business API, AI Agent and Flask portal on loopback ports — and **all eight cases pass**. It stays a separate workflow from `ci.yml` because it installs a browser and boots four servers; the header comment there records the three bugs that used to make it red. The `live` tests stay out of CI entirely — a hosted runner has no WSO2 IS install to clone.
 
 ---
 
@@ -447,68 +639,58 @@ The browser-driven suite lives in `.github/workflows/e2e.yml` and is `workflow_d
 
 When moving from a local demo stack to a production environment:
 
-1. **SSL/TLS Certificates**: For local dev the services disable TLS verification (`IS_VERIFY_TLS=false`) to accommodate WSO2's default self-signed localhost cert. In production, install valid CA-signed certificates and set `IS_VERIFY_TLS=true`.
-2. **Database Migration**: The Business API uses SQLite (`teamspace.db`) by default. Point `DATABASE_URL` at a highly available PostgreSQL or MySQL instance for production.
-3. **Session Store**: Flask sessions are kept on the local file system (`flask_session/`, via `cachelib`). For distributed deployments, switch to a shared store (e.g. Redis).
-4. **Credential Rotation**: Never commit `.env`. Store `GEMINI_API_KEY`, `CLIENT_SECRET`, the internal-secret triplet, and any agent secrets in a secrets manager (e.g. AWS Secrets Manager, HashiCorp Vault) and inject them as environment variables.
-5. **Service-to-Service Auth**: The `X-Internal-Secret` shared-secret scheme used for the M2M calls (webapp↔agent, and webapp/agent→Business API) is a demo simplification and **should not ship to production as-is**. Replace it with mutual TLS (mTLS) or short-lived OAuth 2.0 client-credentials tokens issued by WSO2 IS. See the warning under **M2M Service-to-Service Secrets** in the *Configuration & Environment* section above.
-6. **Production Flag**: Set `FLASK_ENV=production` to enable secure session cookies and the Content-Security-Policy response header.
+1. **SSL/TLS Certificates**: For local dev the services disable TLS verification (`IS_VERIFY_TLS=false`) to accommodate WSO2's default self-signed localhost cert. In production, install valid CA-signed certificates, set `IS_VERIFY_TLS=true`, and terminate TLS in front of the stack — gunicorn is not exposed directly.
+2. **Database Migration**: The Business API uses SQLite (`teamspace.db`) by default. Point `DATABASE_URL` at a highly available PostgreSQL or MySQL instance for production. Schema is managed by Alembic — run `alembic upgrade head` before serving. An existing database created by the old `Base.metadata.create_all` path should be adopted with `alembic stamp head` first, so the baseline is not replayed over live tables.
+3. **Session Store**: Set `REDIS_URL` and Flask sessions move from the local file system (`flask_session/`, via `cachelib`) to Redis. The same variable switches the agent's OBO state store and the rate-limit counters, so one setting makes the whole stack multi-instance capable.
+4. **Credential Rotation**: Never commit `.env`. Store `GEMINI_API_KEY`, `CLIENT_SECRET`, `AGENT_STATE_SIGNING_SECRET`, and any agent secrets in a secrets manager (e.g. AWS Secrets Manager, HashiCorp Vault) and inject them as environment variables.
+5. **Service-to-Service Auth**: M2M calls use short-lived OAuth 2.0 client-credentials tokens issued by WSO2 IS and verified against JWKS — no shared secret. Ensure the `internal_service` API resource is authorized with `NO_POLICY` (`setup_is.py` does this) and that all hops run over TLS. See *Service-to-Service (M2M) Auth* in the *Configuration & Environment* section above. Consider adding mTLS between services as a second layer.
+6. **Production Flag**: Set `FLASK_ENV=production` to enable secure session cookies, the Content-Security-Policy response header, an `INFO` default log level (see `LOG_LEVEL` under *Observability*), and Alembic-owned schema (`DB_AUTO_CREATE` off). The agent additionally refuses to start if it has no stable OAuth state-signing key.
+7. **Serving**: Set `SERVE_MODE=production` so `start.sh` runs gunicorn (with uvicorn workers for the two FastAPI services) instead of the development servers, or use the provided `docker-compose.yml`, which does this for you.
 
 ---
 
 ## ⚠️ Known Issues & Production-Readiness Gaps
 
-Teamspace is a **demonstration app**. Its identity fundamentals are sound — JWTs are
-validated correctly (RS256 pinned, signature-against-JWKS, audience + issuer + expiry
-enforced in `api/auth.py` and `agent/mcp_server.py`), the OBO flow is CSRF-protected,
-and errors don't leak stack traces — but the runtime architecture is single-instance
-demo-grade. The following are known gaps to address before any production use.
+Teamspace is a **demonstration app**, but it is no longer single-instance demo-grade.
+Its identity fundamentals are sound — JWTs are validated correctly (RS256 pinned,
+signature-against-JWKS, audience + issuer + expiry enforced via
+`common/jwt_validation.py`), the portal verifies the OIDC `id_token` including a
+per-login nonce, service-to-service calls use short-lived OAuth 2.0 client-credentials
+tokens, the OBO flow is CSRF-protected, and errors don't leak stack traces. With
+`REDIS_URL` and `SERVE_MODE=production` it runs multi-worker behind gunicorn, with a
+migrated schema and rate-limited endpoints.
+
+The following are the gaps that remain.
 
 ### Blockers
 
-- **Development servers.** `start.sh` runs Flask via the Werkzeug dev server (`flask run`)
-  and `uvicorn` single-process with no workers (`start.sh:19,33,47`). Serve behind a
-  production WSGI/ASGI stack (e.g. gunicorn + uvicorn workers) with TLS termination.
-- **Agent state is in-process memory.** `StateManager`, `AuthManager` (OBO tokens), and
-  `ChatHistoryManager` are in-memory singletons (`agent/auth_manager.py`,
-  `agent/state_manager.py`, `agent/chat_history.py`). State is lost on restart and is not
-  shared across workers/replicas, so the OBO callback can hit a different worker than the
-  one that started the flow. **The agent cannot currently run with more than one
-  instance.** Externalize this state (e.g. Redis) to scale.
-- **DEBUG logging hardcoded, and token claims are logged.** All three services pin
-  `level=logging.DEBUG` (`agent/main.py:24`, `api/main.py:15`, `webapp/app.py:37`), and
-  `api/auth.py:117` logs the full decoded JWT payload (sub, email, org, scopes, `act`) on
-  every authenticated call. Make the log level env-driven (default INFO/WARNING) and
-  remove the decoded-JWT dump.
-- **Random M2M secret fallback.** If `AGENT_INTERNAL_SECRET` is unset, the agent generates
-  a random one at startup (`agent/config.py:54-55`) — fine on one instance, but each
-  replica/restart gets a different value, breaking webapp→agent auth and OBO state signing
-  under scaling. Should fail-fast in production instead of auto-generating.
-- **Static shared-secret M2M.** The `X-Internal-Secret` scheme is symmetric, long-lived,
-  and unscoped — see the warning in the *Configuration & Environment* section. Replace with
-  mTLS or OAuth 2.0 client-credentials tokens.
+*None outstanding.* The five that were listed here — development servers, in-process
+agent state, hardcoded DEBUG logging with a decoded-JWT dump, the random M2M secret
+fallback, and the static shared-secret M2M scheme — have all been addressed. TLS
+termination is still the deployer's responsibility (see *Production Deployment
+Considerations*).
+
 
 ### Medium
 
-- **No CI/CD.** There is no `.github/workflows`; tests, linting, and dependency/security
-  scans are not automated.
-- **No containerization.** No Dockerfile or compose file; deployment is manual via `start.sh`.
-- **No database migrations.** Schema is created with `Base.metadata.create_all`
-  (`api/main.py:29`) — no Alembic. The SQLite default is single-writer; `DATABASE_URL`
-  supports Postgres/MySQL but that path is not exercised here.
-- **Filesystem-backed Flask sessions** (`flask_session/` via `cachelib`) are not shared
-  across instances (see the Session Store note above).
-- **No rate limiting** on the chat or auth endpoints.
+- **Rate limiting is per-instance unless Redis is configured.** With `REDIS_URL` the
+  counters are shared; without it each gunicorn worker keeps its own, so the effective
+  limit is roughly `workers x limit`. In front of a real deployment, a WAF/LB/gateway is
+  usually the better place for this anyway — the in-app limits are a backstop.
+- **The MCP bearer token may be passed as a query parameter.** `?token=` exists because
+  browser `EventSource` cannot set an `Authorization` header. Query strings land in
+  access logs, browser history and `Referer`. Gunicorn's access log is off by default in
+  both `start.sh` and compose — leave it that way, or filter those parameters if you
+  enable it.
 
 ### Low / polish
 
-- `default_secret_key_123` literal as the last-resort state-signing key
-  (`agent/main.py:267,306`) — dead in practice, but a latent footgun.
-- CORS uses `allow_methods=["*"]` (and the agent `allow_headers=["*"]`); origins are
-  restricted, but tighten the rest for production.
-- INFO-level logging includes user chat message content (`agent/main.py:88`).
-- The Ruff rule set is intentionally narrow — no type checking (mypy) or security linter
-  (bandit / `pip-audit`).
+- The Ruff rule set is intentionally narrow — correctness rules only, no type checking
+  (mypy). Security scanning is no longer missing: `ci.yml` runs `pip-audit` against the
+  locked runtime dependencies and `bandit` at medium severity and above.
+- The portal's session `user_scopes` gate the UI only. They now come from a verified
+  access token, but authorization is still enforced server-side by the Business API and
+  the agent — treat the UI state as a hint, never as a boundary.
 
 ---
 

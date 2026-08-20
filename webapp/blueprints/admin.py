@@ -8,9 +8,9 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from webapp.utils.decorators import login_required, admin_required, role_required
 from webapp.utils.roles import TEAMSPACE_ADMIN, IDP_MANAGER, TEAMSPACE_USER
 from webapp.is_client import ISClient
-from webapp.api_proxy import get_organization_plan
+from webapp.api_proxy import resolve_plan_for_gating
 from webapp.is_operations import assign_roles_to_user
-from common.constants import OIDC_AUTHENTICATOR_ID, OIDC_AUTHENTICATOR_NAME, DEFAULT_PLAN
+from common.constants import OIDC_AUTHENTICATOR_ID, OIDC_AUTHENTICATOR_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -22,23 +22,6 @@ def scim_resources(result) -> list[dict[str, Any]]:
     if isinstance(data, dict):
         return data.get("Resources", []) or []
     return []
-
-
-def _check_plan_and_role(org_id: str, required_plan: str, required_role: str, title: str, description: str, upgrade_template: str, org_handle: str | None = None):
-    user_roles = session.get("user_roles", [])
-    if required_role in user_roles:
-        return None
-    plan_info = get_organization_plan(org_id)
-    org_plan = plan_info.get("plan", DEFAULT_PLAN)
-    if org_plan == required_plan:
-        return render_template(
-            "admin/access_denied.html",
-            org_handle=org_handle,
-            title=title,
-            description=description,
-            required_role=required_role,
-        )
-    return render_template(upgrade_template, org_handle=org_handle)
 
 
 def _verify_org_handle(org_handle: str):
@@ -164,11 +147,42 @@ def _apply_idp_role_group_mappings(is_client, token, tenant_path, idp_id, reques
 
 
 def check_idp_access(org_handle, title="Identity Providers", description="Connect external identity providers for federated SSO.", upgrade_template="admin/idp_upgrade.html"):
-    user_roles = session.get("user_roles", [])
-    if IDP_MANAGER not in user_roles:
-        org_id = session.get("user", {}).get("org_id", "")
-        plan_info = get_organization_plan(org_id)
-        org_plan = plan_info.get("plan", "basic")
+    """Gate the IdP features on the enterprise plan and the idp-manager role.
+
+    Both the plan and the role must hold, and the plan is checked first. It used
+    to be consulted only *after* the role check had failed, so `required_plan`
+    was never compared at all: any user holding `required_role` reached the
+    feature whatever their org's plan.
+
+    The role alone is not a safe proxy for the plan. `PLAN_ROLES` grants
+    `idp-manager` and the branding-editor roles on upgrade
+    (`webapp/blueprints/subscription.py`), but that handler never *revokes* them
+    and happily accepts a downgrade, so an org that drops from enterprise to
+    basic keeps every role its old plan granted.
+
+    The plan can also be *unknown* — `resolve_plan_for_gating` returns None when
+    the Business API is unreachable, rather than reporting a default that would
+    silently revoke paid features during an outage. The three-way outcome:
+
+    * plan says no        -> upgrade prompt (this closes the stale-role bypass)
+    * plan says yes       -> role decides; a missing role is an honest
+                             "you need this role" rather than "upgrade"
+    * plan unknown        -> don't punish a paying customer for an outage: allow
+                             if the role is present, otherwise fall back to the
+                             upgrade prompt, which is what this case showed
+                             before and remains the likelier explanation
+    
+    Kept as its own function rather than shared with
+    `agents.py:_check_plan_and_role` because the two differ in how they source
+    `org_handle` and which role they need; the decision table above is the part
+    that matters and is identical in both.
+    """
+    org_id = session.get("user", {}).get("org_id", "")
+    org_plan = resolve_plan_for_gating(org_id)
+    if org_plan is not None and org_plan != "enterprise":
+        return render_template(upgrade_template, org_handle=org_handle)
+
+    if IDP_MANAGER not in session.get("user_roles", []):
         if org_plan == "enterprise":
             return render_template(
                 "admin/access_denied.html",
@@ -177,7 +191,17 @@ def check_idp_access(org_handle, title="Identity Providers", description="Connec
                 description=description,
                 required_role="idp-manager"
             )
+        logger.warning(
+            "Plan unknown for org=%s and idp-manager absent; showing the upgrade prompt",
+            org_id,
+        )
         return render_template(upgrade_template, org_handle=org_handle)
+
+    if org_plan is None:
+        logger.warning(
+            "Plan unknown for org=%s; allowing IdP access on the strength of the "
+            "idp-manager role alone", org_id,
+        )
     return None
 
 

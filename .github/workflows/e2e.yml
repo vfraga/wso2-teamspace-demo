@@ -1,22 +1,34 @@
-# Browser-driven E2E, run on demand only.
+# Browser-driven E2E.
 #
 # tests/e2e/test_e2e_mocked.py is hermetic — it stands up a mock WSO2 IS
 # (FastAPI) alongside the real Business API, AI Agent and Flask portal on
 # loopback ports and drives them with Playwright, so it needs no WSO2
-# install and no Gemini key. It is not wired into ci.yml because three of
-# its eight cases currently fail against the app as it stands:
+# install and no Gemini key.
+#
+# All eight cases pass. The three that used to fail were:
 #
 #   test_complete_e2e_meeting_booking_flow
-#   test_list_update_delete_meeting_flow   - the mock IS issues tokens with
-#       iss=http://127.0.0.1:9444/t/teamspace while api/auth.py validates
-#       against "<IS_BASE_URL><TENANT_PATH>/oauth2/token", so the Business
-#       API rejects every bearer token and the chat panel never renders.
-#   test_idp_upgrade_prompt_for_non_enterprise_user - the AI Agents admin
-#       page no longer renders the .upgrade-lock block for a non-enterprise
-#       plan, so the last assertion of the test finds nothing.
+#   test_list_update_delete_meeting_flow
+#       Two mock-fidelity bugs. The mock IS stamped
+#       iss=http://127.0.0.1:9444/t/teamspace while the services validate
+#       against "<IS_BASE_URL><TENANT_PATH>/oauth2/token" (WSO2's real issuer,
+#       which is why its discovery doc lives at
+#       /oauth2/token/.well-known/openid-configuration) — so the Business API
+#       rejected every bearer token. Its OIDC discovery `issuer` had the same
+#       omission, which made Authlib reject the ID token once the token was
+#       fixed. Separately, the mock's OBO scope list omitted
+#       update_meeting_agent and delete_meeting_agent, which
+#       agent/mcp_server.py requires specifically for destructive tools.
 #
-# Both reproduce locally on 3.10, 3.12 and 3.14 and are unrelated to CI.
-# Once they are fixed this job should move into ci.yml.
+#   test_idp_upgrade_prompt_for_non_enterprise_user
+#       Not a test problem: webapp/blueprints/agents.py:_check_plan_and_role
+#       evaluated the org's plan only *inside* the role-failure branch, so
+#       `required_plan` was never compared and any user holding Teamspace Admin
+#       reached the enterprise-gated AI Agents page on a basic plan.
+#
+# This job still runs separately from ci.yml rather than inside it because it
+# installs a browser (~1 min) and boots four servers; keep it as its own
+# required check rather than slowing the fast lint/test lane.
 #
 # The remaining tests/e2e files are marked `live` and are excluded here:
 # they clone and boot two real WSO2 IS 7.2.0 instances from
@@ -25,7 +37,15 @@
 name: E2E (browser)
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -34,6 +54,11 @@ jobs:
   e2e:
     name: playwright
     runs-on: ubuntu-latest
+    env:
+      # The mocked suite sets CLIENT_ID on each service at runtime, but the
+      # config modules are imported before that; supply a dummy so nothing
+      # reads an empty audience at import time.
+      CLIENT_ID: ci-client-id
     steps:
       - uses: actions/checkout@v4
 

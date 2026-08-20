@@ -15,6 +15,21 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 
 # Generate RS256 key pair once for mock IS
+ALL_MOCK_SCOPES = " ".join([
+    "openid", "email",
+    "create_meeting", "list_meetings", "delete_meeting", "update_meeting", "view_meeting",
+    "view_agent_config", "manage_agent_config",
+    # All four OBO scopes. agent/mcp_server.py:_require_agent_scope demands the
+    # `_agent` variant for update and delete, so omitting them made those tools
+    # permanently forbidden in the mocked flow.
+    "create_meeting_agent", "list_meetings_agent",
+    "update_meeting_agent", "delete_meeting_agent",
+])
+
+# The OAuth client identity shared by the mock IS and all three services.
+E2E_CLIENT_ID = "e2e-test-client-id"
+E2E_CLIENT_SECRET = "e2e-test-client-secret"
+
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 private_pem = private_key.private_bytes(
     encoding=serialization.Encoding.PEM,
@@ -65,15 +80,20 @@ mock_codes_db = MockCodesDB()
 @mock_is.get("/oauth2/token/.well-known/openid-configuration")
 @mock_is.get("/t/{tenant}/oauth2/token/.well-known/openid-configuration")
 def openid_config(tenant: str = None):
-    issuer = "http://127.0.0.1:9444"
+    base = "http://127.0.0.1:9444"
     if tenant:
-        issuer = f"{issuer}/t/{tenant}"
+        base = f"{base}/t/{tenant}"
+    # WSO2 IS's OIDC issuer is "<base>/oauth2/token" — which is why the
+    # discovery document itself is served from
+    # /oauth2/token/.well-known/openid-configuration. It must match the `iss`
+    # the token endpoint stamps, or Authlib rejects the ID token, and it must
+    # match what api/auth.py and agent/mcp_server.py validate against.
     return {
-        "issuer": issuer,
-        "authorization_endpoint": f"{issuer}/oauth2/authorize",
-        "token_endpoint": f"{issuer}/oauth2/token",
-        "userinfo_endpoint": f"{issuer}/oauth2/userinfo",
-        "jwks_uri": f"{issuer}/oauth2/jwks",
+        "issuer": f"{base}/oauth2/token",
+        "authorization_endpoint": f"{base}/oauth2/authorize",
+        "token_endpoint": f"{base}/oauth2/token",
+        "userinfo_endpoint": f"{base}/oauth2/userinfo",
+        "jwks_uri": f"{base}/oauth2/jwks",
         "response_types_supported": ["code", "token"],
         "subject_types_supported": ["public"],
         "id_token_signing_alg_values_supported": ["RS256"]
@@ -146,12 +166,41 @@ async def token(request: FastApiRequest, tenant: str = None):
     
     code = params.get("code")
     actor_token = params.get("actor_token")
+    grant_type = params.get("grant_type")
     
     now = int(time.time())
-    iss = f"http://127.0.0.1:9444/t/{tenant}" if tenant else "http://127.0.0.1:9444/t/teamspace"
-    client_id = Config.CLIENT_ID or "fLHf61QVhvGKJwOhM3NvekepG1Aa"
+    # Must match what the services validate against, namely
+    # f"{IS_BASE_URL}{TENANT_PATH}/oauth2/token" — see common/jwt_validation.py
+    # token_issuer(). Omitting the "/oauth2/token" suffix made the Business API
+    # reject every token, which is what broke the mocked E2E flows.
+    base = f"http://127.0.0.1:9444/t/{tenant}" if tenant else "http://127.0.0.1:9444/t/teamspace"
+    iss = f"{base}/oauth2/token"
+    client_id = E2E_CLIENT_ID
     
-    # Check 3 mock token modes:
+    # Check the mock token modes:
+    if grant_type == "client_credentials":
+        # M2M service token: no user behind it, so no user claims. `aut` is
+        # APPLICATION and the scope is whatever was requested, mirroring the
+        # `internal_service` API resource authorized with NO_POLICY.
+        requested_scope = params.get("scope", "internal_service")
+        payload = {
+            "iss": iss,
+            "aud": client_id,
+            "azp": client_id,
+            "client_id": client_id,
+            "sub": client_id,
+            "aut": "APPLICATION",
+            "scope": requested_scope,
+            "exp": now + 3600,
+            "iat": now,
+        }
+        token_str = jwt.encode(payload, private_pem, algorithm="RS256", headers={"kid": "default"})
+        return {
+            "access_token": token_str,
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "scope": requested_scope,
+        }
     if actor_token:
         # OBO Token Exchange
         payload = {
@@ -170,7 +219,7 @@ async def token(request: FastApiRequest, tenant: str = None):
             "org_handle": "numbainfinite",
             "roles": ["Teamspace Admin"],
             "groups": ["admin"],
-            "scope": "openid email create_meeting list_meetings delete_meeting update_meeting view_meeting view_agent_config manage_agent_config create_meeting_agent list_meetings_agent",
+            "scope": ALL_MOCK_SCOPES,
             "exp": now + 3600,
             "iat": now,
         }
@@ -184,7 +233,7 @@ async def token(request: FastApiRequest, tenant: str = None):
             "org_id": "org-infinite-id",
             "org_name": "Teamspace",
             "org_handle": "teamspace",
-            "scope": "openid email create_meeting list_meetings delete_meeting update_meeting view_meeting view_agent_config manage_agent_config create_meeting_agent list_meetings_agent",
+            "scope": ALL_MOCK_SCOPES,
             "exp": now + 3600,
             "iat": now,
         }
@@ -223,7 +272,7 @@ async def token(request: FastApiRequest, tenant: str = None):
             "org_handle": org_handle,
             "roles": roles,
             "groups": ["admin"],
-            "scope": "openid email create_meeting list_meetings delete_meeting update_meeting view_meeting view_agent_config manage_agent_config create_meeting_agent list_meetings_agent",
+            "scope": ALL_MOCK_SCOPES,
             "exp": now + 3600,
             "iat": now,
         }
@@ -499,6 +548,7 @@ def run_isolated_servers():
         except Exception:
             pass
             
+    api_settings.CLIENT_ID = E2E_CLIENT_ID
     api_settings.DATABASE_URL = f"sqlite:///{test_db}"
     api_settings.ALLOWED_ORIGINS = ["http://127.0.0.1:5002"]
     api_settings.IS_BASE_URL = "http://127.0.0.1:9444"
@@ -511,11 +561,19 @@ def run_isolated_servers():
     agent_settings.AGENT_REDIRECT_URI = "http://127.0.0.1:8002/callback"
     agent_settings.AGENT_SERVICE_URL = "http://127.0.0.1:8002"
     agent_settings.ALLOWED_ORIGINS = ["http://127.0.0.1:5002"]
-    agent_settings.INTERNAL_SECRET = "test-internal-secret"
+    # Service-to-service auth is now OAuth 2.0 client credentials, minted from
+    # these against the mock IS token endpoint.
+    agent_settings.CLIENT_ID = E2E_CLIENT_ID
+    agent_settings.CLIENT_SECRET = E2E_CLIENT_SECRET
+    agent_settings.STATE_SIGNING_SECRET = "test-e2e-state-signing-key"
+    agent_settings.IS_VERIFY_TLS = False
     agent_settings.IS_ORG_HANDLE = "teamspace"
     agent_settings.TENANT_PATH = "/t/teamspace"
     
     # Configure Flask App
+    Config.CLIENT_ID = E2E_CLIENT_ID
+    Config.CLIENT_SECRET = E2E_CLIENT_SECRET
+    Config.IS_VERIFY_TLS = False
     Config.BUSINESS_API_URL = "http://127.0.0.1:9092"
     Config.AGENT_SERVICE_URL = "http://127.0.0.1:8002"
     Config.IS_BASE_URL = "http://127.0.0.1:9444"
@@ -528,7 +586,9 @@ def run_isolated_servers():
     flask_app.config.update({
         "BUSINESS_API_URL": "http://127.0.0.1:9092",
         "AGENT_SERVICE_URL": "http://127.0.0.1:8002",
-        "AGENT_INTERNAL_SECRET": "test-internal-secret",
+        "CLIENT_ID": E2E_CLIENT_ID,
+        "CLIENT_SECRET": E2E_CLIENT_SECRET,
+        "IS_VERIFY_TLS": False,
         "IS_BASE_URL": "http://127.0.0.1:9444",
         "IS_ORG_HANDLE": "teamspace",
         "TENANT_PATH": "/t/teamspace",
@@ -541,6 +601,23 @@ def run_isolated_servers():
     
     # Initialize Business API tables
     ApiBase.metadata.create_all(bind=api_engine)
+
+    # Seed the enterprise org's plan row.
+    #
+    # The enterprise-plan test user is granted the idp-manager role by the mock
+    # IS, but the plan gate now checks the org's actual plan as well as the role
+    # (see webapp/blueprints/admin.py:check_idp_access) — because the role alone
+    # is not a safe proxy: subscription.py grants a plan's roles on upgrade and
+    # never revokes them on downgrade. A real enterprise org always has this row
+    # (signup and upgrade both write one), so seeding it makes the fixture
+    # faithful rather than papering over the gate.
+    from api.models import OrganizationPlan as _OrganizationPlan
+    from sqlalchemy.orm import Session as _Session
+
+    with _Session(api_engine) as _seed:
+        _seed.merge(_OrganizationPlan(org="org-enterprise-id", plan="enterprise"))
+        _seed.merge(_OrganizationPlan(org="org-infinite-id", plan="basic"))
+        _seed.commit()
 
     # Start all 4 servers
     mock_is_thread = UvicornServer(mock_is, 9444)

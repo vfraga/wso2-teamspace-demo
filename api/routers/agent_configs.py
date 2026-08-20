@@ -4,7 +4,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
-from api.auth import UserInfo, get_current_user, require_internal_secret, require_scope
+from common.m2m_auth import SERVICE_AUTH_HEADER
+from api.auth import UserInfo, get_current_user, require_scope, require_service_auth
 from api.database import get_db
 from api.models import AgentConfig
 from api.schemas import AgentConfigCreate, AgentConfigResponse
@@ -19,32 +20,34 @@ router = APIRouter()
 def get_agent_config(
     org_id: str,
     user: Optional[UserInfo] = Depends(get_current_user),
-    x_internal_secret: Optional[str] = Header(None, alias="X-Internal-Secret"),
+    service_authorization: Optional[str] = Header(None, alias=SERVICE_AUTH_HEADER),
     db: Session = Depends(get_db),
 ):
     """Read the agent configuration for an organization.
 
     Auth priority:
-    1. `X-Internal-Secret` is the trust gate. When present and valid, the caller
-       is a trusted service (webapp or agent). The user JWT — if also present —
-       is recorded for audit/observability only, NOT used for scope checks.
-       This is the path used by the webapp's chat send_message and send_stream
-       routes so non-admins can start the OBO flow (which needs agent_id/
-       agent_secret to obtain the actor_token).
+    1. `X-Service-Authorization` is the trust gate. When it carries a valid
+       client-credentials token with the `internal_service` scope, the caller is
+       a trusted service (webapp or agent). The user JWT — if also present in
+       `Authorization` — is recorded for audit/observability only, NOT used for
+       scope checks. This is the path used by the webapp's chat send_message and
+       send_stream routes so non-admins can start the OBO flow (which needs
+       agent_id/agent_secret to obtain the actor_token).
     2. If only a user JWT is present, the `view_agent_config` or
        `view_agent_config_agent` scope is required, and the JWT's `org` claim
-       must match the path `org_id`. This is the legacy admin-UI path.
+       must match the path `org_id`. This is the admin-UI path.
     3. If neither is present, the call is rejected (401).
 
-    The org path parameter is the tenant boundary for the M2M path. The
-    internal secret proves the caller is a trusted service; we trust it to
-    know which org it wants (e.g. the agent fetches its own config by the
-    org it already knows it's serving).
+    The org path parameter is the tenant boundary for the M2M path. The service
+    token proves the caller is a trusted service; we trust it to know which org
+    it wants (e.g. the agent fetches its own config by the org it already knows
+    it is serving). Unlike the shared secret this replaced, that token is
+    short-lived, scoped, and verifiable against WSO2 IS.
     """
-    if x_internal_secret is not None:
-        require_internal_secret(x_internal_secret)
+    if service_authorization is not None:
+        service_claims = require_service_auth(service_authorization)
         actor = f"user {user.user_id}" if user is not None else "M2M service"
-        auth_source = f"internal-secret trusted, acting as {actor}"
+        auth_source = f"service token {service_claims.get('sub', '?')}, acting as {actor}"
     elif user is not None:
         scopes = set(user.scopes)
         if "view_agent_config" not in scopes and "view_agent_config_agent" not in scopes:
@@ -58,7 +61,10 @@ def get_agent_config(
     else:
         raise HTTPException(
             status_code=401,
-            detail="Authentication required: provide X-Internal-Secret header or user JWT with view_agent_config scope",
+            detail=(
+                "Authentication required: provide an X-Service-Authorization service "
+                "token or a user JWT with the view_agent_config scope"
+            ),
         )
 
     config = db.query(AgentConfig).filter(AgentConfig.org == org_id).first()

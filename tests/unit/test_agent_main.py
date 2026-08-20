@@ -11,8 +11,10 @@ def test_agent_main_app_structure():
 
 def test_chat_route_validation():
     client = TestClient(agent_app)
-    # Request without required x-internal-secret should fail with 403 Forbidden (since secret is configured in conftest or config)
-    with patch("agent.main.settings") as mock_settings:
-        mock_settings.INTERNAL_SECRET = "my-secret-key"
-        resp = client.post("/chat", json={"thread_id": "t1", "message": "hello", "org_name": "org"})
-        assert resp.status_code == 403
+    # No X-Service-Authorization service token: rejected before the body is
+    # even validated. 401 (unauthenticated) rather than the old 403, because
+    # the caller now presents a credential we can identify rather than a
+    # shared secret we can only compare.
+    resp = client.post("/chat", json={"thread_id": "t1", "message": "hello", "org_name": "org"})
+    assert resp.status_code == 401
+    assert "X-Service-Authorization" in resp.json()["detail"]

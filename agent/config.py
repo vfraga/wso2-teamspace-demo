@@ -1,8 +1,9 @@
 import os
-import secrets
 from typing import Optional
 
 from common.config import CommonDefaults, load_env
+from common.logging_setup import is_production
+from common.m2m_auth import M2MConfig, ServiceTokenClient
 
 load_env()
 
@@ -32,24 +33,58 @@ class Settings:
     ALLOWED_ORIGINS: list[str] = os.getenv(
         "ALLOWED_ORIGINS", "http://localhost:5001"
     ).split(",")
-    INTERNAL_SECRET: str = os.getenv("AGENT_INTERNAL_SECRET", "")
-    BUSINESS_API_INTERNAL_SECRET: str = os.getenv("BUSINESS_API_INTERNAL_SECRET", "")
     MOCK_LLM: bool = os.getenv("MOCK_LLM", "false").lower() == "true"
     IS_VERIFY_TLS: bool = os.getenv("IS_VERIFY_TLS", "true").lower() != "false"
 
+    # HMAC key for the agent's OAuth `state` JWT. It must be stable and shared
+    # across every agent instance: /authorize signs the state and /callback
+    # verifies it, and with more than one worker those are different processes.
+    STATE_SIGNING_SECRET: str = os.getenv("AGENT_STATE_SIGNING_SECRET", "")
+
     def state_jwt_signing_secret(self) -> str:
-        raw_internal = os.getenv("AGENT_INTERNAL_SECRET", "")
-        if raw_internal:
-            return raw_internal
+        """Return the HMAC key for the OAuth state JWT, or raise.
+
+        Falls back to ``CLIENT_SECRET`` — already a stable, per-deployment
+        secret — so the demo needs no extra configuration. Deliberately never
+        generates a value: a random key verifies only on the instance that
+        signed it, which silently breaks the OBO callback under scaling.
+        """
+        if self.STATE_SIGNING_SECRET:
+            return self.STATE_SIGNING_SECRET
         if self.CLIENT_SECRET:
             return self.CLIENT_SECRET
         raise ValueError(
-            "Cannot sign or verify OAuth state JWT: "
-            "AGENT_INTERNAL_SECRET and CLIENT_SECRET are both empty"
+            "Cannot sign or verify the OAuth state JWT: set AGENT_STATE_SIGNING_SECRET "
+            "(or CLIENT_SECRET). A generated fallback is intentionally not used — it "
+            "would only verify on the instance that signed it."
         )
 
 
 settings = Settings()
 
-if not settings.INTERNAL_SECRET:
-    settings.INTERNAL_SECRET = secrets.token_urlsafe(64)
+
+def m2m_config() -> M2MConfig:
+    """Snapshot of what the agent needs to mint a service token.
+
+    Read per call, not captured once: TENANT_PATH is computed from
+    IS_ORG_HANDLE and the test suite swaps IS_BASE_URL at runtime.
+    """
+    return M2MConfig(
+        is_base_url=settings.IS_BASE_URL,
+        tenant_path=settings.TENANT_PATH,
+        client_id=settings.CLIENT_ID,
+        client_secret=settings.CLIENT_SECRET,
+        verify_tls=settings.IS_VERIFY_TLS,
+    )
+
+
+#: Service token used for the agent -> Business API hop.
+service_token_client = ServiceTokenClient(m2m_config, label="AI Agent")
+
+if is_production():
+    # A production deployment must not discover a missing state-signing key
+    # halfway through a user's OBO consent flow.
+    try:
+        settings.state_jwt_signing_secret()
+    except ValueError as exc:
+        raise RuntimeError(f"FLASK_ENV=production but the agent cannot sign OAuth state: {exc}") from exc

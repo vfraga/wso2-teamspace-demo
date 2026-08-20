@@ -37,8 +37,10 @@ class Config:
 
     BUSINESS_API_URL = os.getenv("BUSINESS_API_URL", CommonDefaults.BUSINESS_API_URL)
     AGENT_SERVICE_URL = os.getenv("AGENT_SERVICE_URL", CommonDefaults.AGENT_SERVICE_URL)
-    AGENT_INTERNAL_SECRET = os.getenv("AGENT_INTERNAL_SECRET", "")
-    BUSINESS_API_INTERNAL_SECRET = os.getenv("BUSINESS_API_INTERNAL_SECRET", "")
+    # Service-to-service calls (webapp -> agent, webapp -> Business API) use
+    # OAuth 2.0 client-credentials tokens minted from CLIENT_ID/CLIENT_SECRET
+    # above and sent as X-Service-Authorization. No shared secret is needed;
+    # see common/m2m_auth.py.
 
     DEFAULT_LOGO_URL = os.getenv("DEFAULT_LOGO_URL", CommonDefaults.DEFAULT_LOGO_URL)
     DEFAULT_FAVICON_URL = os.getenv("DEFAULT_FAVICON_URL", CommonDefaults.DEFAULT_FAVICON_URL)

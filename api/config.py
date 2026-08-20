@@ -10,11 +10,9 @@ class Settings:
     IS_BASE_URL: str = os.getenv("IS_BASE_URL", CommonDefaults.IS_BASE_URL)
     IS_ORG_HANDLE: str = os.getenv("IS_ORG_HANDLE", "")
     CLIENT_ID: str = os.getenv("CLIENT_ID", "")
-    # Shared secret for service-to-service auth. The webapp and the agent
-    # service both know this value (from env); they present it as the
-    # X-Internal-Secret header when calling endpoints that opt in to M2M
-    # auth. Keep this distinct from the webapp→agent AGENT_INTERNAL_SECRET.
-    INTERNAL_SECRET: str = os.getenv("INTERNAL_SECRET", "")
+    # Service-to-service auth needs no shared secret: callers present an
+    # OAuth 2.0 client-credentials token from WSO2 IS, verified against JWKS
+    # with the same CLIENT_ID audience as a user token. See common/m2m_auth.py.
 
     _tenant_path: Optional[str] = None
 

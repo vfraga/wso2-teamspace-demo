@@ -1,3 +1,6 @@
+import time
+from urllib.parse import parse_qs, urlparse
+
 import pytest
 import jwt
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -11,6 +14,32 @@ def mock_validate_mcp_token():
             "scope": "openid email create_meeting list_meetings delete_meeting update_meeting create_meeting_agent list_meetings_agent delete_meeting_agent update_meeting_agent"
         }
         yield mock_val
+
+AGENT_TEST_AUDIENCE = "test-client-id"
+
+
+@pytest.fixture
+def service_auth(monkeypatch):
+    """Mint valid `X-Service-Authorization` headers for the agent service.
+
+    The agent's endpoints are no longer gated on a shared secret: they verify
+    an OAuth 2.0 client-credentials token against JWKS, so tests present real
+    signed tokens.
+    """
+    from agent.config import settings as agent_settings
+    from tests.helpers.tokens import issuer_for, patch_agent_jwks, service_auth_header
+
+    monkeypatch.setattr(agent_settings, "CLIENT_ID", AGENT_TEST_AUDIENCE)
+    issuer = issuer_for(agent_settings.IS_BASE_URL, agent_settings.TENANT_PATH)
+
+    def _headers(**overrides):
+        overrides.setdefault("audience", AGENT_TEST_AUDIENCE)
+        overrides.setdefault("issuer", issuer)
+        return service_auth_header(**overrides)
+
+    with patch_agent_jwks():
+        yield _headers
+
 
 @pytest.fixture
 def mock_gemini_run_agent():
@@ -43,17 +72,14 @@ def test_agent_health(agent_client):
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
 
-def test_agent_chat_idle_state(agent_client, mock_gemini_run_agent, mock_auth_manager):
+def test_agent_chat_idle_state(agent_client, mock_gemini_run_agent, mock_auth_manager, service_auth):
     # Test chatting when the state is IDLE
     payload = {
         "thread_id": "thread-123",
         "message": "Hi, who are you?",
         "org_name": "numbainfinite"
     }
-    headers = {"X-Internal-Secret": "mock-internal-secret"}
-    with patch("agent.main.settings") as mock_settings:
-        mock_settings.INTERNAL_SECRET = "mock-internal-secret"
-        resp = agent_client.post("/chat", json=payload, headers=headers)
+    resp = agent_client.post("/chat", json=payload, headers=service_auth())
     assert resp.status_code == 200
     
     data = resp.json()
@@ -70,7 +96,7 @@ def test_agent_callback_exchange(agent_client, mock_auth_manager):
     # §2.1.4: callback CSRF is fail-closed — requires MOCK_LLM for plain state strings
     with patch("agent.main.settings") as mock_settings:
         mock_settings.MOCK_LLM = True
-        mock_settings.INTERNAL_SECRET = "mock-internal-secret"
+        mock_settings.state_jwt_signing_secret.return_value = "mock-internal-secret"
 
         # Trigger callback endpoint
         resp = agent_client.get("/callback?code=authcode123&state=thread-555")
@@ -89,9 +115,124 @@ def test_agent_callback_exchange(agent_client, mock_auth_manager):
     assert state_mgr.get_state("thread-555") == FlowState.BOOKING_AUTHORIZED
 
 
-def _build_callback_state_jwt(thread_id: str, action: str, csrf: str, secret: str) -> str:
-    payload = {"thread_id": thread_id, "action": action, "state": csrf}
+def _build_callback_state_jwt(
+    thread_id: str, action: str, csrf: str, secret: str, *, expires_in: int = 300
+) -> str:
+    now = int(time.time())
+    payload = {
+        "thread_id": thread_id, "action": action, "state": csrf,
+        "iat": now, "exp": now + expires_in,
+    }
     return jwt.encode(payload, secret, algorithm="HS256")
+
+
+def _build_oauth_cookie(
+    thread_id: str, action: str, csrf: str, secret: str, *, expires_in: int = 300
+) -> str:
+    now = int(time.time())
+    return jwt.encode(
+        {"thread_id": thread_id, "action": action, "state": csrf,
+         "iat": now, "exp": now + expires_in},
+        secret, algorithm="HS256",
+    )
+
+
+# ---------------------------------------------------------------------------
+# CSRF and replay protection on /callback
+#
+# The OBO callback has two factors: the HMAC-signed `state` parameter and the
+# paired `oauth_session` cookie. Both were weaker than they looked — the state
+# carried no `exp`, so a captured one was a permanent replay credential, and the
+# cookie was only checked `if cookie_val`, so omitting it skipped the second
+# factor entirely. Together that allowed authorization-code injection.
+# ---------------------------------------------------------------------------
+
+
+def test_callback_without_the_csrf_cookie_is_refused(agent_client, mock_auth_manager):
+    secret = "mock-internal-secret"
+    with patch("agent.main.settings") as mock_settings:
+        mock_settings.MOCK_LLM = False
+        mock_settings.state_jwt_signing_secret.return_value = secret
+        signed_state = _build_callback_state_jwt("t-nocookie", "booking", "csrf-1", secret)
+        # Valid, unexpired, correctly signed state — but no cookie.
+        resp = agent_client.get(f"/callback?code=abc&state={signed_state}")
+
+    assert resp.status_code == 400
+    assert "Invalid OAuth session" in resp.text
+    mock_auth_manager.exchange_obo_code.assert_not_awaited()
+
+
+def test_callback_with_an_expired_state_is_refused(agent_client, mock_auth_manager):
+    secret = "mock-internal-secret"
+    with patch("agent.main.settings") as mock_settings:
+        mock_settings.MOCK_LLM = False
+        mock_settings.state_jwt_signing_secret.return_value = secret
+        stale = _build_callback_state_jwt(
+            "t-stale", "booking", "csrf-2", secret, expires_in=-60
+        )
+        cookie = _build_oauth_cookie("t-stale", "booking", "csrf-2", secret)
+        resp = agent_client.get(
+            f"/callback?code=abc&state={stale}", cookies={"oauth_session": cookie}
+        )
+
+    assert resp.status_code == 400
+    # A distinct message: an expired state is what happens when someone leaves
+    # the consent screen open, not an attack.
+    assert "expired" in resp.text.lower()
+    mock_auth_manager.exchange_obo_code.assert_not_awaited()
+
+
+def test_callback_with_an_expired_cookie_is_refused(agent_client, mock_auth_manager):
+    secret = "mock-internal-secret"
+    with patch("agent.main.settings") as mock_settings:
+        mock_settings.MOCK_LLM = False
+        mock_settings.state_jwt_signing_secret.return_value = secret
+        signed_state = _build_callback_state_jwt("t-cexp", "booking", "csrf-3", secret)
+        stale_cookie = _build_oauth_cookie(
+            "t-cexp", "booking", "csrf-3", secret, expires_in=-60
+        )
+        resp = agent_client.get(
+            f"/callback?code=abc&state={signed_state}",
+            cookies={"oauth_session": stale_cookie},
+        )
+
+    assert resp.status_code == 400
+    assert "expired" in resp.text.lower()
+    mock_auth_manager.exchange_obo_code.assert_not_awaited()
+
+
+def test_authorize_issues_an_expiring_state_and_cookie(agent_client):
+    """/authorize must stamp exp on both halves, or the replay window is forever."""
+    from agent.state_manager import StateManager
+    from agent.store import InMemoryStore, set_store
+
+    secret = "mock-internal-secret"
+    set_store(InMemoryStore())
+    try:
+        StateManager.get_instance().set_agent_credentials("t-exp", "agent-1", "s-1")
+        with patch("agent.main.settings") as mock_settings:
+            mock_settings.state_jwt_signing_secret.return_value = secret
+            mock_settings.CLIENT_ID = "cid"
+            mock_settings.AGENT_REDIRECT_URI = "http://localhost:8000/callback"
+            mock_settings.IS_BASE_URL = "https://localhost:9443"
+            mock_settings.TENANT_PATH = "/t/teamspace"
+            resp = agent_client.get(
+                "/authorize?thread_id=t-exp&action=book", follow_redirects=False
+            )
+    finally:
+        set_store(None)
+
+    assert resp.status_code in (302, 307)
+    state = parse_qs(urlparse(resp.headers["location"]).query)["state"][0]
+    claims = jwt.decode(state, secret, algorithms=["HS256"])
+    assert "exp" in claims and "iat" in claims
+    assert 0 < claims["exp"] - claims["iat"] <= 300
+
+    cookie_jwt = resp.cookies["oauth_session"]
+    cookie_claims = jwt.decode(cookie_jwt, secret, algorithms=["HS256"])
+    # Both halves must expire together, or the state could outlive its cookie.
+    assert cookie_claims["exp"] == claims["exp"]
+    assert cookie_claims["state"] == claims["state"]
 
 
 def test_agent_callback_signed_state_with_matching_cookie(agent_client, mock_auth_manager):
@@ -99,8 +240,8 @@ def test_agent_callback_signed_state_with_matching_cookie(agent_client, mock_aut
     state_mgr.set_agent_credentials("thread-csrf-happy", "agent-csrf", "secret-csrf")
 
     with patch("agent.main.settings") as mock_settings:
-        mock_settings.INTERNAL_SECRET = "mock-internal-secret"
         secret = "mock-internal-secret"
+        mock_settings.state_jwt_signing_secret.return_value = secret
         signed_state = _build_callback_state_jwt(
             "thread-csrf-happy", "booking", "csrf-token-happy", secret
         )
@@ -127,8 +268,8 @@ def test_agent_callback_mismatched_cookie(agent_client, mock_auth_manager):
     state_mgr.set_agent_credentials("thread-csrf-mismatch", "agent-mismatch", "secret-mismatch")
 
     with patch("agent.main.settings") as mock_settings:
-        mock_settings.INTERNAL_SECRET = "mock-internal-secret"
         secret = "mock-internal-secret"
+        mock_settings.state_jwt_signing_secret.return_value = secret
         signed_state = _build_callback_state_jwt(
             "thread-csrf-mismatch", "booking", "csrf-expected", secret
         )
@@ -157,7 +298,7 @@ def test_agent_callback_state_split_fallback_is_test_only(agent_client, mock_aut
 
     with patch("agent.main.settings") as mock_settings:
         mock_settings.MOCK_LLM = True
-        mock_settings.INTERNAL_SECRET = "mock-internal-secret"
+        mock_settings.state_jwt_signing_secret.return_value = "mock-internal-secret"
 
         resp = agent_client.get("/callback?code=auth-legacy&state=thread-legacy:booking")
         assert resp.status_code == 200
@@ -167,92 +308,85 @@ def test_agent_callback_state_split_fallback_is_test_only(agent_client, mock_aut
     assert state_mgr.get_state("thread-legacy") == FlowState.BOOKING_AUTHORIZED
 
 
-def test_agent_token_generation(agent_client, mock_auth_manager):
-    # Set headers with correct internal secret
-    headers = {"X-Internal-Secret": "mock-internal-secret"}
-    
-    # We patch settings to match our headers
-    with patch("agent.main.settings") as mock_settings:
-        mock_settings.INTERNAL_SECRET = "mock-internal-secret"
-        
-        resp = agent_client.post("/agent-token", headers=headers)
-        assert resp.status_code == 200
-        assert resp.json() == {"access_token": "mock-agent-token-123"}
-        mock_auth_manager.fetch_agent_token.assert_awaited_once()
+def test_agent_token_generation(agent_client, mock_auth_manager, service_auth):
+    resp = agent_client.post("/agent-token", headers=service_auth())
+    assert resp.status_code == 200
+    assert resp.json() == {"access_token": "mock-agent-token-123"}
+    mock_auth_manager.fetch_agent_token.assert_awaited_once()
 
-def test_get_state_internal(agent_client, mock_auth_manager):
-    headers = {"X-Internal-Secret": "mock-internal-secret"}
-    
-    with patch("agent.main.settings") as mock_settings:
-        mock_settings.INTERNAL_SECRET = "mock-internal-secret"
-        
-        # Preset state to BOOKING_AUTHORIZED (maps to FrontendState.BOOKING_COMPLETE)
-        state_mgr = StateManager.get_instance()
-        state_mgr.set_state("thread-999", FlowState.BOOKING_AUTHORIZED)
-        
-        resp = agent_client.get("/state/thread-999", headers=headers)
-        assert resp.status_code == 200
-        
+
+def test_get_state_internal(agent_client, mock_auth_manager, service_auth):
+    # Preset state to BOOKING_AUTHORIZED (maps to FrontendState.BOOKING_COMPLETE)
+    state_mgr = StateManager.get_instance()
+    state_mgr.set_state("thread-999", FlowState.BOOKING_AUTHORIZED)
+
+    resp = agent_client.get("/state/thread-999", headers=service_auth())
+    assert resp.status_code == 200
+
+    if True:
         data = resp.json()
         assert data["state"] == "BOOKING_COMPLETE"
         assert data["obo_jwt"] == "mock-obo-jwt-payload"
         assert data["agent_jwt"] == "mock-agent-jwt-payload"
 
 
-def test_agent_chat_missing_internal_secret(agent_client):
-    # Test chat endpoint with missing X-Internal-Secret header when internal secret is set
-    # (should return 403 Forbidden since secret check is active)
-    payload = {
-        "thread_id": "thread-123",
-        "message": "Hi",
-        "org_name": "test-org"
-    }
-    with patch("agent.main.settings") as mock_settings:
-        mock_settings.INTERNAL_SECRET = "some-internal-secret"
-        resp = agent_client.post("/chat", json=payload)
+_CHAT_PAYLOAD = {"thread_id": "thread-123", "message": "Hi", "org_name": "test-org"}
+
+
+def test_agent_chat_without_service_token_is_rejected(agent_client):
+    resp = agent_client.post("/chat", json=_CHAT_PAYLOAD)
+    assert resp.status_code == 401
+    assert "X-Service-Authorization" in resp.json()["detail"]
+
+
+def test_agent_chat_with_no_credentials_configured_still_fails_closed(
+    agent_client, mock_gemini_run_agent, mock_auth_manager, monkeypatch
+):
+    """The old shared-secret check failed OPEN when the secret was unset.
+
+    `agent/main.py` used to wrap the comparison in `if settings.INTERNAL_SECRET:`
+    while `agent/config.py` generated a random secret to keep that from
+    happening. With the secret gone, an unconfigured deployment must reject the
+    call rather than serve an unauthenticated one.
+    """
+    from agent.config import settings as agent_settings
+
+    monkeypatch.setattr(agent_settings, "CLIENT_ID", "")
+    monkeypatch.setattr(agent_settings, "CLIENT_SECRET", "")
+
+    resp = agent_client.post("/chat", json=_CHAT_PAYLOAD)
+    assert resp.status_code == 401
+
+
+def test_agent_chat_with_unverifiable_token_is_rejected(agent_client, service_auth):
+    resp = agent_client.post(
+        "/chat", json=_CHAT_PAYLOAD,
+        headers={"X-Service-Authorization": "Bearer not-a-real-jwt"},
+    )
+    assert resp.status_code == 401
+
+
+def test_agent_chat_with_expired_service_token_is_rejected(agent_client, service_auth):
+    resp = agent_client.post("/chat", json=_CHAT_PAYLOAD, headers=service_auth(expires_in=-60))
+    assert resp.status_code == 401
+    assert "expired" in resp.json()["detail"].lower()
+
+
+def test_agent_chat_without_internal_service_scope_is_rejected(agent_client, service_auth):
+    resp = agent_client.post(
+        "/chat", json=_CHAT_PAYLOAD, headers=service_auth(scope="list_meetings"),
+    )
     assert resp.status_code == 403
-    assert resp.json() == {"detail": "Forbidden"}
+    assert "internal_service" in resp.json()["detail"]
 
 
-def test_agent_chat_missing_internal_secret_when_secret_unset(agent_client, mock_gemini_run_agent, mock_auth_manager):
-    # Test chat endpoint with missing X-Internal-Secret header when internal secret is unset/empty
-    # (should pass the header/secret check and return 200)
-    payload = {
-        "thread_id": "thread-123",
-        "message": "Hi",
-        "org_name": "test-org"
-    }
-    with patch("agent.main.settings") as mock_settings:
-        mock_settings.INTERNAL_SECRET = ""
-        resp = agent_client.post("/chat", json=payload)
-    assert resp.status_code == 200
-
-
-def test_agent_chat_invalid_internal_secret(agent_client):
-    # Test chat endpoint with invalid X-Internal-Secret header (should return 403 Forbidden)
-    payload = {
-        "thread_id": "thread-123",
-        "message": "Hi",
-        "org_name": "test-org"
-    }
-    headers = {"X-Internal-Secret": "wrong-secret"}
-    with patch("agent.main.settings") as mock_settings:
-        mock_settings.INTERNAL_SECRET = "correct-secret"
-        resp = agent_client.post("/chat", json=payload, headers=headers)
-    assert resp.status_code == 403
-    assert resp.json() == {"detail": "Forbidden"}
-
-
-def test_agent_chat_missing_required_payload_fields(agent_client):
-    # Test chat endpoint with correct secret but missing message in payload (should return 422)
+def test_agent_chat_missing_required_payload_fields(agent_client, service_auth):
+    # Valid service token, but the body is missing `message` (should be 422).
     payload = {
         "thread_id": "thread-123"
         # message is missing
     }
-    headers = {"X-Internal-Secret": "mock-internal-secret"}
-    with patch("agent.main.settings") as mock_settings:
-        mock_settings.INTERNAL_SECRET = "mock-internal-secret"
-        resp = agent_client.post("/chat", json=payload, headers=headers)
+    resp = agent_client.post("/chat", json=payload, headers=service_auth())
     assert resp.status_code == 422
     data = resp.json()
     assert "detail" in data
@@ -536,52 +670,101 @@ def test_update_meeting_tool_flow_booking_state_yields_waiting(mock_auth_manager
 
 
 @patch("agent.main.run_agent")
-def test_agent_chat_httpx_timeout_graceful(mock_run, agent_client, mock_auth_manager):
+def test_agent_chat_httpx_timeout_graceful(mock_run, agent_client, mock_auth_manager, service_auth):
     import httpx
     mock_run.side_effect = httpx.ReadTimeout("Read timed out")
     
-    with patch("agent.main.settings") as mock_settings:
-        mock_settings.INTERNAL_SECRET = "test-secret"
-        resp = agent_client.post(
-            "/chat",
-            json={"thread_id": "test-t1", "message": "hello", "org_name": "Batata"},
-            headers={"X-Internal-Secret": "test-secret"}
-        )
+    resp = agent_client.post(
+        "/chat",
+        json={"thread_id": "test-t1", "message": "hello", "org_name": "Batata"},
+        headers=service_auth(),
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert "timed out" in data["message"]
 
 
 @patch("agent.main.run_agent")
-def test_agent_chat_httpx_error_graceful(mock_run, agent_client, mock_auth_manager):
+def test_agent_chat_httpx_error_graceful(mock_run, agent_client, mock_auth_manager, service_auth):
     import httpx
     mock_run.side_effect = httpx.ReadError("Connection reset by peer")
     
-    with patch("agent.main.settings") as mock_settings:
-        mock_settings.INTERNAL_SECRET = "test-secret"
-        resp = agent_client.post(
-            "/chat",
-            json={"thread_id": "test-t1", "message": "hello", "org_name": "Batata"},
-            headers={"X-Internal-Secret": "test-secret"}
-        )
+    resp = agent_client.post(
+        "/chat",
+        json={"thread_id": "test-t1", "message": "hello", "org_name": "Batata"},
+        headers=service_auth(),
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert "failed to communicate" in data["message"]
 
 
 @patch("agent.main.run_agent")
-def test_agent_chat_google_api_error_graceful(mock_run, agent_client, mock_auth_manager):
+def test_agent_chat_google_api_error_graceful(mock_run, agent_client, mock_auth_manager, service_auth):
     from google.genai.errors import APIError
     mock_run.side_effect = APIError(429, {"error": "Resource exhausted"})
     
-    with patch("agent.main.settings") as mock_settings:
-        mock_settings.INTERNAL_SECRET = "test-secret"
-        resp = agent_client.post(
-            "/chat",
-            json={"thread_id": "test-t1", "message": "hello", "org_name": "Batata"},
-            headers={"X-Internal-Secret": "test-secret"}
-        )
+    resp = agent_client.post(
+        "/chat",
+        json={"thread_id": "test-t1", "message": "hello", "org_name": "Batata"},
+        headers=service_auth(),
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert "rate limit" in data["message"]
 
+
+
+# --- /state token exposure -------------------------------------------------
+#
+# The raw OBO and agent JWTs feed the portal's JWT inspector, which is the point
+# of the demo. They are still bearer tokens, and any service-token holder can
+# ask for any thread, so production withholds them.
+
+
+def _seed_tokens(thread_id: str):
+    import time as _time
+
+    from agent.auth_manager import _NS_AGENT_TOKEN, _NS_OBO_TOKEN
+    from agent.store import get_store
+
+    store = get_store()
+    for ns, tok in ((_NS_OBO_TOKEN, "obo-token-value"), (_NS_AGENT_TOKEN, "agent-token-value")):
+        store.set(ns, thread_id, {"token": tok, "expires_at": _time.time() + 3600})
+
+
+def test_state_exposes_raw_tokens_outside_production(agent_client, service_auth, monkeypatch):
+    from agent.store import InMemoryStore, set_store
+
+    monkeypatch.delenv("FLASK_ENV", raising=False)
+    set_store(InMemoryStore())
+    try:
+        _seed_tokens("t-inspect")
+        resp = agent_client.get("/state/t-inspect", headers=service_auth())
+    finally:
+        set_store(None)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["obo_jwt"] == "obo-token-value"
+    assert data["agent_jwt"] == "agent-token-value"
+
+
+def test_state_withholds_raw_tokens_in_production(agent_client, service_auth, monkeypatch):
+    from agent.store import InMemoryStore, set_store
+
+    monkeypatch.setenv("FLASK_ENV", "production")
+    set_store(InMemoryStore())
+    try:
+        _seed_tokens("t-inspect")
+        resp = agent_client.get("/state/t-inspect", headers=service_auth())
+    finally:
+        set_store(None)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    # The state itself is still served — only the bearer tokens are held back.
+    assert data["state"] == "IDLE"
+    assert data["obo_jwt"] is None
+    assert data["agent_jwt"] is None
+    assert data["tokens_withheld"] is True

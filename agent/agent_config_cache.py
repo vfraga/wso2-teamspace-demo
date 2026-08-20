@@ -5,7 +5,7 @@ from typing import Optional
 
 import httpx
 
-from agent.config import settings
+from agent.config import service_token_client, settings
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +36,9 @@ async def fetch_and_cache_agent_config(
 ) -> Optional[dict]:
     """Fetch the agent configuration for ``org_id`` from the Business API.
 
-    Uses the M2M ``X-Internal-Secret`` channel so the agent service can
-    read its own configuration without requiring the calling user to hold
-    the ``view_agent_config`` scope. Results are cached for
+    Uses the M2M service-token channel so the agent service can read its own
+    configuration without requiring the calling user to hold the
+    ``view_agent_config`` scope. Results are cached for
     ``_AGENT_CONFIG_TTL_SECONDS`` per ``org_id``.
 
     Returns the parsed config dict on success, ``None`` if the API rejects
@@ -55,22 +55,38 @@ async def fetch_and_cache_agent_config(
                     logger.debug("Agent config cache hit for org=%s", org_id)
                     return cached
 
-    if not settings.BUSINESS_API_INTERNAL_SECRET:
+    headers = await service_token_client.aauth_headers()
+    if not headers:
         logger.warning(
-            "BUSINESS_API_INTERNAL_SECRET is not configured on the agent; "
-            "cannot fetch agent config via M2M"
+            "No service token available on the agent; cannot fetch agent config via M2M"
         )
         return None
 
     url = f"{settings.BUSINESS_API_URL.rstrip('/')}/agent-config/org/{org_id}"
-    headers = {"X-Internal-Secret": settings.BUSINESS_API_INTERNAL_SECRET}
 
-    try:
-        async with httpx.AsyncClient(verify=settings.IS_VERIFY_TLS, timeout=10.0) as client:
-            resp = await client.get(url, headers=headers)
-    except httpx.RequestError:
-        logger.exception("M2M fetch of agent config failed for org=%s", org_id)
+    async def _get(request_headers: dict) -> Optional[httpx.Response]:
+        try:
+            async with httpx.AsyncClient(verify=settings.IS_VERIFY_TLS, timeout=10.0) as client:
+                return await client.get(url, headers=request_headers)
+        except httpx.RequestError:
+            logger.exception("M2M fetch of agent config failed for org=%s", org_id)
+            return None
+
+    resp = await _get(headers)
+    if resp is None:
         return None
+
+    if resp.status_code == 401:
+        # The cached token may have been revoked or the IS keys rotated. Mint a
+        # fresh one and retry exactly once before giving up.
+        logger.info("Service token rejected by the Business API; retrying with a fresh token")
+        service_token_client.invalidate()
+        retry_headers = await service_token_client.aauth_headers(force_refresh=True)
+        if not retry_headers:
+            return None
+        resp = await _get(retry_headers)
+        if resp is None:
+            return None
 
     if resp.status_code != 200:
         logger.warning(

@@ -34,6 +34,76 @@ jobs:
       - name: Lint
         run: uv run --frozen ruff check .
 
+  security:
+    name: dependency + code scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # Audits the LOCKED runtime dependencies, which is what actually ships —
+      # not whatever the resolver would pick today. --no-dev because a CVE in a
+      # test-only tool isn't in the deployed image.
+      - name: Export locked runtime dependencies
+        run: uv export --frozen --no-dev --no-emit-project --no-hashes -o requirements-runtime.txt
+
+      - name: Audit dependencies for known CVEs
+        run: uvx pip-audit --disable-pip --no-deps -r requirements-runtime.txt
+
+      # Only medium+ severity. Bandit's LOW tier is dominated by B105
+      # ("possible hardcoded password") firing on variables merely *named*
+      # token/secret — e.g. `_NS_OBO_TOKEN = "obo_token"` — which would bury
+      # anything real.
+      - name: Scan for security anti-patterns
+        run: uvx bandit -r agent api common webapp setup_is.py --severity-level medium -q
+
+  postgres:
+    name: pytest (postgres)
+    runs-on: ubuntu-latest
+    # DATABASE_URL accepts any SQLAlchemy URL, but only the SQLite default used
+    # to be exercised — and it wasn't actually working: `check_same_thread` is a
+    # SQLite-only connect arg, and the WAL/busy_timeout PRAGMA listener fired on
+    # every backend. This job keeps the non-SQLite path honest.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: teamspace
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CLIENT_ID: ci-client-id
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/teamspace
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/teamspace
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev --extra postgres --python 3.12
+
+      # The migration is the thing most likely to be SQLite-specific, so apply
+      # it for real before running anything against the result.
+      - name: Apply migrations
+        run: uv run --frozen alembic upgrade head
+
+      - name: Run integration tests against Postgres
+        run: uv run --frozen pytest tests/integration -m "not live" -v
+
   test:
     name: pytest (py${{ matrix.python-version }})
     runs-on: ubuntu-latest

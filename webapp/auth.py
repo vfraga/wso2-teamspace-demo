@@ -10,6 +10,8 @@ from authlib.integrations.flask_client import OAuth
 from flask import session, redirect, url_for, current_app
 from werkzeug.wrappers import Response
 
+from common.jwt_validation import decode_rs256, jwks_url, select_signing_key, token_issuer
+from common.logging_setup import is_production
 from common.safe_auth_logger import SafeAuthLogger
 from webapp.utils.roles import TEAMSPACE_ADMIN
 
@@ -24,6 +26,19 @@ def init_oauth(app) -> None:
         del oauth._clients["wso2is"]
     is_base = app.config["IS_BASE_URL"]
     tenant_path = app.config.get("TENANT_PATH", "")
+
+    # TLS verification for OIDC discovery, the token endpoint AND the JWKS
+    # fetch. This was hardcoded to False, which meant `IS_VERIFY_TLS` had no
+    # effect on the OIDC path at all — including in production, and including
+    # the JWKS the id_token signature is checked against. Verifying a signature
+    # with keys pulled over an unauthenticated channel is not verification.
+    verify_tls = app.config.get("IS_VERIFY_TLS", True)
+    if not verify_tls:
+        logger.warning(
+            "TLS verification is DISABLED for the WSO2 IS OIDC client (IS_VERIFY_TLS=false). "
+            "Expected for local dev against a self-signed certificate; never set this in production."
+        )
+
     oauth.register(
         name="wso2is",
         client_id=app.config["CLIENT_ID"],
@@ -32,10 +47,30 @@ def init_oauth(app) -> None:
         client_kwargs={
             "scope": app.config["OIDC_SCOPES"],
             "token_endpoint_auth_method": "client_secret_post",
-            "verify": False,
+            "verify": verify_tls,
         },
         fetch_token=lambda: session.get("token"),
     )
+
+
+def _explain_tls_failure(exc: Exception, stage: str) -> bool:
+    """Log an actionable message for a TLS trust failure. True if that's what it was.
+
+    WSO2 IS ships a self-signed localhost certificate, so the first thing a
+    developer hits when IS_VERIFY_TLS is unset (it defaults to true) is a bare
+    SSLCertVerificationError from deep inside httpx. Name the setting instead.
+    """
+    text = f"{type(exc).__name__}: {exc}"
+    if "CERTIFICATE_VERIFY_FAILED" not in text and "SSLError" not in text and "SSLCertVerification" not in text:
+        return False
+    logger.error(
+        "TLS verification failed talking to WSO2 IS during %s. If this is local dev "
+        "against the default self-signed certificate, set IS_VERIFY_TLS=false (see "
+        ".env.example). In production, install a CA-signed certificate rather than "
+        "disabling verification. Underlying error: %s",
+        stage, text,
+    )
+    return True
 
 
 def start_login(org_id: str | None = None) -> Response:
@@ -48,15 +83,28 @@ def start_login(org_id: str | None = None) -> Response:
         hashlib.sha256(code_verifier.encode()).digest()
     ).rstrip(b"=").decode()
 
+    # OIDC nonce: sent here, echoed by the IdP into the id_token, and checked in
+    # handle_callback. Required — Authlib's parse_id_token takes `nonce` as a
+    # positional argument, and without it the verified parse cannot be called
+    # at all (see the comment there).
+    nonce = secrets.token_urlsafe(32)
+    session["oidc_nonce"] = nonce
+
     extra_params = {
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
+        "nonce": nonce,
     }
     if org_id:
         extra_params["fidp"] = "OrganizationSSO"
         extra_params["orgId"] = org_id
 
-    return oauth.wso2is.authorize_redirect(redirect_uri, **extra_params)
+    try:
+        return oauth.wso2is.authorize_redirect(redirect_uri, **extra_params)
+    except Exception as exc:
+        if not _explain_tls_failure(exc, "the OIDC discovery/authorize step"):
+            logger.exception("Failed to start the login flow")
+        raise
 
 
 def decode_jwt_unverified(token_str: str, name: str) -> dict | None:
@@ -91,21 +139,93 @@ def _derive_display_name(id_claims: dict, email: str) -> tuple[str, str]:
     return prefix.title(), domain_name.title()
 
 
+def _verify_access_token(raw_token: str) -> dict | None:
+    """Verify the access token, or fall back to an unverified decode outside production.
+
+    Its claims drive `user_scopes`, which gates what the UI offers. That is not
+    the real authorization boundary — the Business API and the agent both verify
+    this token themselves on every call — but a portal that renders its own menu
+    from an unverified token is doing avoidable trust. Reuses the same
+    primitives as the services (`common/jwt_validation.py`).
+
+    Mirrors the id_token policy: production refuses rather than downgrading.
+    """
+    if not raw_token:
+        return None
+
+    is_base = current_app.config.get("IS_BASE_URL", "")
+    tenant_path = current_app.config.get("TENANT_PATH", "")
+    try:
+        jwks = _fetch_jwks(is_base, tenant_path)
+        key = select_signing_key(jwks, raw_token)
+        return decode_rs256(
+            raw_token,
+            key,
+            audience=current_app.config.get("CLIENT_ID", ""),
+            issuer=token_issuer(is_base, tenant_path),
+        )
+    except Exception as exc:
+        detail = f"{type(exc).__name__}: {exc}"
+        if is_production():
+            logger.error("access_token verification failed, refusing login: %s", detail)
+            return None
+        logger.warning(
+            "access_token verification failed (%s); falling back to an UNVERIFIED "
+            "decode because this is not a production deployment.", detail,
+        )
+        return decode_jwt_unverified(raw_token, "access_token")
+
+
+def _fetch_jwks(is_base: str, tenant_path: str) -> dict:
+    """Fetch the IdP's JWKS, honouring IS_VERIFY_TLS."""
+    resp = requests.get(
+        jwks_url(is_base, tenant_path),
+        verify=current_app.config.get("IS_VERIFY_TLS", True),
+        timeout=5,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 def handle_callback() -> Response:
     code_verifier = session.pop("code_verifier", "")
-    token = oauth.wso2is.authorize_access_token(code_verifier=code_verifier)
+    try:
+        token = oauth.wso2is.authorize_access_token(code_verifier=code_verifier)
+    except Exception as exc:
+        if not _explain_tls_failure(exc, "the OIDC token exchange"):
+            logger.exception("Failed to exchange the authorization code")
+        raise
 
     session["token"] = token
     session["access_token"] = token["access_token"]
     session["id_token_raw"] = token.get("id_token", "")
     session["refresh_token"] = token.get("refresh_token", "")
 
+    # Verify the id_token: signature against the IdP's JWKS, plus issuer,
+    # audience, expiry and the nonce we sent in start_login.
+    #
+    # `nonce` is a REQUIRED positional argument of Authlib's parse_id_token
+    # (1.7.x). Calling it without one raised TypeError on every single login,
+    # which the except branch below swallowed — silently downgrading every
+    # login to an *unverified* decode. Keep the argument.
+    nonce = session.pop("oidc_nonce", None)
+    id_claims = None
     try:
-        id_claims = oauth.wso2is.parse_id_token(token)
+        id_claims = dict(oauth.wso2is.parse_id_token(token, nonce=nonce))
     except Exception as e:
-        logger.error("id_token verification failed: %s", str(e).split('"')[0] if '"' in str(e) else str(e))
+        detail = str(e).split('"')[0] if '"' in str(e) else str(e)
+        if is_production():
+            # Never fall back to an unverified identity in production.
+            logger.error("id_token verification failed, refusing login: %s", detail)
+            session.clear()
+            return redirect(url_for("main.login"))
+        logger.warning(
+            "id_token verification failed (%s); falling back to an UNVERIFIED decode "
+            "because this is not a production deployment. Set FLASK_ENV=production to "
+            "make this a hard failure.", detail,
+        )
         id_claims = decode_jwt_unverified(token.get("id_token", ""), "id_token")
-    access_claims = decode_jwt_unverified(token.get("access_token", ""), "access_token")
+    access_claims = _verify_access_token(token.get("access_token", ""))
     logger.debug("id_token claims: %s", id_claims)
     logger.debug("access_token claims: %s", access_claims)
     if id_claims is None or access_claims is None:
