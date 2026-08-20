@@ -139,6 +139,13 @@ def _bootstrap_application(s):
     resp = s.post(f"{TENANT_API}/applications", auth=TENANT_ADMIN_AUTH, json={
         "name": "FederatedClient",
         "templateId": "b9c5e11e-fc78-484b-9bec-015d247561b8",
+        "claimConfiguration": {
+            "dialect": "LOCAL",
+            "requestedClaims": [
+                {"claim": {"uri": "http://wso2.org/claims/givenname"}},
+                {"claim": {"uri": "http://wso2.org/claims/lastname"}}
+            ],
+        },
         "inboundProtocolConfiguration": {
             "oidc": {
                 "grantTypes": ["authorization_code", "refresh_token"],
