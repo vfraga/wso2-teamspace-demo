@@ -15,6 +15,7 @@ from agent.auth_manager import AuthManager
 from agent.state_manager import StateManager, FlowState
 from agent.config import settings
 from agent.tool_schemas import make_meeting_schema
+from common.jwt_validation import CLOCK_SKEW_SECONDS
 
 # SECURITY: The SSE/messages endpoints in agent/main.py accept the MCP
 # bearer token via `?token=` because browser EventSource cannot set custom
@@ -108,6 +109,9 @@ def validate_mcp_token(token: str) -> dict[str, Any]:
     if not key:
         raise ValueError(f"Signing key not found for kid={header.get('kid')}")
 
+    # Same clock-skew tolerance as every other verifier in the stack, so an MCP
+    # tool call cannot fail on `iat` while the identical token is accepted by
+    # the Business API. See common/jwt_validation.CLOCK_SKEW_SECONDS.
     decoded = jwt.decode(
         token,
         key=key,
@@ -115,6 +119,7 @@ def validate_mcp_token(token: str) -> dict[str, Any]:
         options={"verify_aud": True},
         audience=settings.CLIENT_ID,
         issuer=f"{settings.IS_BASE_URL}{settings.TENANT_PATH}/oauth2/token",
+        leeway=CLOCK_SKEW_SECONDS,
     )
     return decoded
 

@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from api.auth import UserInfo, get_current_user
 from api.config import settings
+from common.jwt_validation import CLOCK_SKEW_SECONDS
 from fastapi.security import HTTPAuthorizationCredentials
 
 
@@ -91,7 +92,10 @@ def test_get_current_user_valid_token_returns_userinfo():
 
 def test_get_current_user_expired_token_yields_401():
     private_pem, _, jwk = _make_rsa_keypair()
-    expired = _valid_payload({"exp": int(time.time()) - 60})
+    # Comfortably past CLOCK_SKEW_SECONDS. This used to be exp-60, which now
+    # lands exactly on the leeway boundary and passed only because validation
+    # happens a few microseconds after the token is built.
+    expired = _valid_payload({"exp": int(time.time()) - CLOCK_SKEW_SECONDS - 60})
     token = _sign(expired, private_pem)
 
     with _patch_jwks({"keys": [jwk]}):
@@ -104,6 +108,36 @@ def test_get_current_user_wrong_signing_key_yields_401():
     _, _, jwk = _make_rsa_keypair()
     other_private, _, _ = _make_rsa_keypair()
     token = _sign(_valid_payload(), other_private)
+
+    with _patch_jwks({"keys": [jwk]}):
+        with pytest.raises(HTTPException) as exc_info:
+            get_current_user(_cred(token))
+    assert exc_info.value.status_code == 401
+
+
+# --- clock skew ------------------------------------------------------------
+#
+# WSO2 IS and the services are different machines whenever the stack runs in
+# containers, and a Docker VM's clock drifts against its host. A token whose
+# `iat` is a moment in the future used to fail with "The token is not yet
+# valid (iat)", which showed up as intermittent 401s on the M2M and OBO paths.
+
+
+def test_token_issued_slightly_in_the_future_is_accepted():
+    private_pem, _, jwk = _make_rsa_keypair()
+    ahead = int(time.time()) + CLOCK_SKEW_SECONDS - 5
+    token = _sign(_valid_payload({"iat": ahead, "nbf": ahead}), private_pem)
+
+    with _patch_jwks({"keys": [jwk]}):
+        user = get_current_user(_cred(token))
+
+    assert user.user_id == "user-jwt"
+
+
+def test_token_issued_far_in_the_future_is_still_rejected():
+    private_pem, _, jwk = _make_rsa_keypair()
+    ahead = int(time.time()) + CLOCK_SKEW_SECONDS + 300
+    token = _sign(_valid_payload({"iat": ahead, "nbf": ahead}), private_pem)
 
     with _patch_jwks({"keys": [jwk]}):
         with pytest.raises(HTTPException) as exc_info:

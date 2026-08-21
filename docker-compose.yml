@@ -35,6 +35,11 @@ x-common-env: &common-env
   DATABASE_URL: ${DATABASE_URL:-sqlite:////data/teamspace.db}
   ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5001}
   REDIS_URL: redis://redis:6379/0
+  # WSO2 IS runs on the host while these services run in a VM whose clock
+  # drifts against it (notably after the host sleeps). Without tolerance, a
+  # token issued a moment "in the future" is rejected on `iat` and the M2M and
+  # OBO calls 401 intermittently. Raise this if your VM drifts further.
+  JWT_CLOCK_SKEW_SECONDS: ${JWT_CLOCK_SKEW_SECONDS:-60}
 
 services:
   redis:
