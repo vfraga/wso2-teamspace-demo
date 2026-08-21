@@ -65,10 +65,23 @@ def upgrade(org_handle):
         # Save the new plan to the SQLite DB
         plan_save_res = save_organization_plan(org_id, target_plan, token=sub_org_token)
         if plan_save_res.status_code not in (200, 201):
+            # The plan lives in the Business API, not in IS. Roles may now be
+            # shared and assigned, but the plan the UI reads is unchanged, so
+            # reporting success here left the user on their old plan with no
+            # indication anything had gone wrong.
             logger.error("Failed to update organization plan in DB: status=%s, body=%s", plan_save_res.status_code, plan_save_res.data)
-        else:
-            # Update the cached plan in session so UI reflects immediately
-            session["org_plan"] = target_plan
+            flash({
+                "type": "error",
+                "message": (
+                    f"Roles for the {plan['name']} plan were granted, but saving the plan "
+                    f"failed ({plan_save_res.status_code}). Your organization is still on "
+                    "its previous plan — please retry."
+                ),
+                "api_debug_list": api_debug_list,
+            })
+            return redirect(url_for("subscription.plans", org_handle=org_handle))
+        # Update the cached plan in session so UI reflects immediately
+        session["org_plan"] = target_plan
     else:
         logger.error("Failed to switch org context for plan update")
         flash("Failed to update organization plan. Please try again.", "error")

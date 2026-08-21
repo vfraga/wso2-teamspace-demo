@@ -14,7 +14,9 @@ Usage:
 """
 
 import os
+import re
 import sys
+from urllib.parse import urlparse
 
 import requests
 from dotenv import load_dotenv
@@ -34,8 +36,25 @@ SUPER_ADMIN_PASSWORD = os.environ.get("IS_SUPER_ADMIN_PASSWORD", "")
 if not SUPER_ADMIN_PASSWORD:
     import warnings
     warnings.warn("IS_SUPER_ADMIN_PASSWORD not set — IS API calls will fail with 401", RuntimeWarning, stacklevel=2)
-HOST_DOMAIN = "localhost:9443"
-BASE_URL = f"https://{HOST_DOMAIN}"
+# WSO2 IS stamps its configured hostname into every URL it issues (discovery,
+# `iss`, jwks_uri), so provisioning must use the same host the services use.
+BASE_URL = os.environ.get("IS_BASE_URL", "https://localhost:9443").rstrip("/")
+HOST_DOMAIN = urlparse(BASE_URL).netloc
+
+# Browser-facing base URLs of the two OIDC clients on the Teamspace application.
+# AGENT_SERVICE_URL is the agent's own public origin, the same variable the
+# agent reads to build AGENT_REDIRECT_URI — registering the callback from a
+# second variable let the two drift apart and IS rejected the flow with
+# "callback.not.match".
+PORTAL_URL = os.environ.get("PORTAL_URL", "http://localhost:5001").rstrip("/")
+AGENT_SERVICE_URL = os.environ.get("AGENT_SERVICE_URL", "http://localhost:8000").rstrip("/")
+
+APP_ALLOWED_ORIGINS = [PORTAL_URL, AGENT_SERVICE_URL]
+# WSO2 treats a `regexp=` callback as a regular expression, so the base URLs are
+# run through re.escape(): an unescaped `.` in a hostname would match any char.
+APP_CALLBACK_URLS = [
+    f"regexp=({re.escape(PORTAL_URL)}.*|{re.escape(AGENT_SERVICE_URL)}.*)"
+]
 
 TENANT_DOMAIN = "teamspace"
 TENANT_ADMIN_USERNAME = "teamspaceadmin"
@@ -179,8 +198,8 @@ def create_application(s):
         "inboundProtocolConfiguration": {
             "oidc": {
                 "grantTypes": ["authorization_code", "client_credentials", "organization_switch", "refresh_token"],
-                "allowedOrigins": ["http://localhost:5001", "http://localhost:8000"],
-                "callbackURLs": ["regexp=(http://localhost:5001.*|http://localhost:8000.*)"],
+                "allowedOrigins": APP_ALLOWED_ORIGINS,
+                "callbackURLs": APP_CALLBACK_URLS,
                 "publicClient": False,
                 "accessToken": {
                     "accessTokenAttributes": ["email"],
@@ -270,8 +289,8 @@ def update_oidc_config(s, app_id, client_id):
     resp = s.put(f"{TENANT_API}/applications/{app_id}/inbound-protocols/oidc", auth=TENANT_ADMIN_AUTH, json={
         "clientId": client_id,
         "grantTypes": ["authorization_code", "client_credentials", "organization_switch", "refresh_token"],
-        "allowedOrigins": ["http://localhost:5001", "http://localhost:8000"],
-        "callbackURLs": ["regexp=(http://localhost:5001.*|http://localhost:8000.*)"],
+        "allowedOrigins": APP_ALLOWED_ORIGINS,
+        "callbackURLs": APP_CALLBACK_URLS,
         "publicClient": False,
         "accessToken": {
             "accessTokenAttributes": ["email"],

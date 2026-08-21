@@ -20,6 +20,47 @@ else
     RELOAD_EXCLUDES=""
 fi
 
+# TLS is opt-in: point TLS_CERT_DIR at the generated PKI material (pki/out)
+# and every service is served over HTTPS instead of plain HTTP. Left unset,
+# the quickstart in the README works with no certificates at all.
+#
+# Layout is whatever pki/generate.sh produces:
+#   $TLS_CERT_DIR/<name>/<name>.fullchain.pem  +  <name>.key
+TLS_CERT_DIR="${TLS_CERT_DIR:-}"
+
+tls_cert() { echo "$TLS_CERT_DIR/$1/$1.fullchain.pem"; }
+tls_key() { echo "$TLS_CERT_DIR/$1/$1.key"; }
+
+if [ -n "$TLS_CERT_DIR" ]; then
+    for _name in businessapi aiagent flaskapp; do
+        if [ ! -f "$(tls_cert "$_name")" ] || [ ! -f "$(tls_key "$_name")" ]; then
+            echo "ERROR: TLS_CERT_DIR=$TLS_CERT_DIR but no certificate for '$_name'."
+            echo "       Expected $(tls_cert "$_name")"
+            echo "       Run ./pki/generate.sh first, or unset TLS_CERT_DIR to serve over HTTP."
+            exit 1
+        fi
+    done
+    SCHEME="https"
+    echo "TLS enabled; serving HTTPS with certificates from $TLS_CERT_DIR."
+else
+    SCHEME="http"
+    echo "TLS disabled (TLS_CERT_DIR unset); serving plain HTTP."
+fi
+
+# gunicorn and uvicorn spell the same thing differently.
+gunicorn_tls_args() {
+    [ -n "$TLS_CERT_DIR" ] || return 0
+    echo "--certfile=$(tls_cert "$1") --keyfile=$(tls_key "$1")"
+}
+uvicorn_tls_args() {
+    [ -n "$TLS_CERT_DIR" ] || return 0
+    echo "--ssl-certfile $(tls_cert "$1") --ssl-keyfile $(tls_key "$1")"
+}
+flask_tls_args() {
+    [ -n "$TLS_CERT_DIR" ] || return 0
+    echo "--cert=$(tls_cert "$1") --key=$(tls_key "$1")"
+}
+
 if [ "$SERVE_MODE" = "production" ]; then
     API_WORKERS="${API_WORKERS:-4}"
     AGENT_WORKERS="${AGENT_WORKERS:-4}"
@@ -60,41 +101,41 @@ echo "Starting Business API on port 9091..."
 if [ "$SERVE_MODE" = "production" ]; then
     ./.venv/bin/python3 -m gunicorn api.main:app \
         --worker-class uvicorn.workers.UvicornWorker \
-        --workers "$API_WORKERS" --bind 0.0.0.0:9091 &
+        --workers "$API_WORKERS" --bind 0.0.0.0:9091 $(gunicorn_tls_args businessapi) &
 else
-    ./.venv/bin/python3 -m uvicorn api.main:app --host 0.0.0.0 --port 9091 --ws none $RELOAD_FLAG $RELOAD_EXCLUDES &
+    ./.venv/bin/python3 -m uvicorn api.main:app --host 0.0.0.0 --port 9091 --ws none $RELOAD_FLAG $RELOAD_EXCLUDES $(uvicorn_tls_args businessapi) &
 fi
 API_PID=$!
 echo $API_PID > /tmp/teamspace_api.pid
-wait_for_health http://localhost:9091/health "API"
+wait_for_health "$SCHEME://localhost:9091/health" "API"
 
 echo "Starting AI Agent Service on port 8000..."
 if [ "$SERVE_MODE" = "production" ]; then
     ./.venv/bin/python3 -m gunicorn agent.main:app \
         --worker-class uvicorn.workers.UvicornWorker \
-        --workers "$AGENT_WORKERS" --bind 0.0.0.0:8000 &
+        --workers "$AGENT_WORKERS" --bind 0.0.0.0:8000 $(gunicorn_tls_args aiagent) &
 else
-    ./.venv/bin/python3 -m uvicorn agent.main:app --host 0.0.0.0 --port 8000 --ws none $RELOAD_FLAG $RELOAD_EXCLUDES &
+    ./.venv/bin/python3 -m uvicorn agent.main:app --host 0.0.0.0 --port 8000 --ws none $RELOAD_FLAG $RELOAD_EXCLUDES $(uvicorn_tls_args aiagent) &
 fi
 AGENT_PID=$!
 echo $AGENT_PID > /tmp/teamspace_agent.pid
-wait_for_health http://localhost:8000/health "agent"
+wait_for_health "$SCHEME://localhost:8000/health" "agent"
 
 echo "Starting Flask Web App on port 5001..."
 if [ "$SERVE_MODE" = "production" ]; then
     ./.venv/bin/python3 -m gunicorn "webapp.app:create_app()" \
-        --workers "$WEBAPP_WORKERS" --bind 0.0.0.0:5001 &
+        --workers "$WEBAPP_WORKERS" --bind 0.0.0.0:5001 $(gunicorn_tls_args flaskapp) &
 else
-    FLASK_APP=webapp.app:create_app ./.venv/bin/python3 -m flask run --host 0.0.0.0 --port 5001 $DEBUG_FLAG &
+    FLASK_APP=webapp.app:create_app ./.venv/bin/python3 -m flask run --host 0.0.0.0 --port 5001 $DEBUG_FLAG $(flask_tls_args flaskapp) &
 fi
 WEBAPP_PID=$!
 echo $WEBAPP_PID > /tmp/teamspace_webapp.pid
 
 echo ""
 echo "All services started:"
-echo "  Web App:      http://localhost:5001"
-echo "  Business API: http://localhost:9091"
-echo "  AI Agent:     http://localhost:8000"
+echo "  Web App:      $SCHEME://localhost:5001"
+echo "  Business API: $SCHEME://localhost:9091"
+echo "  AI Agent:     $SCHEME://localhost:8000"
 echo ""
 echo "Press Ctrl+C to stop all services."
 

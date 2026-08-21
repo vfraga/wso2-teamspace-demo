@@ -130,8 +130,8 @@ def create_app() -> Flask:
     _configure_session_backend(app)
     is_org_handle = app.config.get("IS_ORG_HANDLE", "")
     app.config["TENANT_PATH"] = f"/t/{is_org_handle}" if is_org_handle else ""
-    app.config["OIDC_REDIRECT_URI"] = f"http://{Config.FLASK_HOST}:{Config.FLASK_PORT}/callback"
-    app.config["OIDC_POST_LOGOUT_URI"] = f"http://{Config.FLASK_HOST}:{Config.FLASK_PORT}"
+    app.config["OIDC_REDIRECT_URI"] = f"{Config.PORTAL_URL}/callback"
+    app.config["OIDC_POST_LOGOUT_URI"] = Config.PORTAL_URL
 
     logger.info("Creating Flask app, port=%s", Config.FLASK_PORT)
 

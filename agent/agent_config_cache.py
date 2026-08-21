@@ -66,7 +66,7 @@ async def fetch_and_cache_agent_config(
 
     async def _get(request_headers: dict) -> Optional[httpx.Response]:
         try:
-            async with httpx.AsyncClient(verify=settings.IS_VERIFY_TLS, timeout=10.0) as client:
+            async with httpx.AsyncClient(verify=settings.SERVICE_VERIFY_TLS, timeout=10.0) as client:
                 return await client.get(url, headers=request_headers)
         except httpx.RequestError:
             logger.exception("M2M fetch of agent config failed for org=%s", org_id)

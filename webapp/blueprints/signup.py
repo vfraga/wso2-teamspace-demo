@@ -193,8 +193,21 @@ def register():
     # Save the selected plan to the SQLite DB
     plan_save_res = save_organization_plan(new_org_id, selected_plan, token=sub_org_token)
     if plan_save_res.status_code not in (200, 201):
+        # The org and its admin exist in IS, so this is not worth failing the
+        # signup over. But the plan is what gates the UI, and without a row the
+        # org silently reads as "basic" — say so instead of reporting a clean
+        # signup and letting the admin discover it later.
         logger.error("Failed to save organization plan to DB: status=%s, body=%s", plan_save_res.status_code, plan_save_res.data)
-
+        flash({
+            "type": "warning",
+            "message": (
+                f"Organization '{org_name}' was created, but saving the {selected_plan} plan "
+                f"failed ({plan_save_res.status_code}). It starts on the basic plan; an admin "
+                "can upgrade it from the Subscription page."
+            ),
+            "api_debug_list": api_debug_list,
+        })
+        return redirect(url_for("main.landing", org_handle=org_handle))
 
     flash({
         "type": "success",

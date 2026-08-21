@@ -129,9 +129,7 @@ services:
       FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:?set FLASK_SECRET_KEY (must be stable across replicas)}
       FLASK_HOST: ${FLASK_HOST:-localhost}
       FLASK_PORT: ${FLASK_PORT:-5001}
-      FEDERATED_IDP_URL: ${FEDERATED_IDP_URL:-}
-      FEDERATED_IDP_ADMIN_USER: ${FEDERATED_IDP_ADMIN_USER:-}
-      FEDERATED_IDP_ADMIN_PASSWORD: ${FEDERATED_IDP_ADMIN_PASSWORD:-}
+
     depends_on:
       redis:
         condition: service_healthy

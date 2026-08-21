@@ -8,20 +8,26 @@ Standalone: ``python setup_idp_server.py``  (used by live E2E test harness)
 """
 
 import json
+import re
 import sys
 import os
 import stat
+from urllib.parse import urlparse
+
 import requests
 import urllib3
+from dotenv import load_dotenv
 
 from common.config import CommonDefaults
 from webapp.is_operations import build_is_branding_payload
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+load_dotenv()
+
 # ─── Configuration ───────────────────────────────────────────────────────────
 
-BASE_URL = "https://localhost:9444"
+BASE_URL = os.environ.get("FEDERATED_IS_BASE_URL", "https://localhost:9444").rstrip("/")
 SUPER_ADMIN_USERNAME = os.environ.get("IS_SUPER_ADMIN_USERNAME", "admin")
 SUPER_ADMIN_PASSWORD = os.environ.get("IS_SUPER_ADMIN_PASSWORD", "")
 if not SUPER_ADMIN_PASSWORD:
@@ -40,6 +46,41 @@ FEDERATED_USER_PASSWORD = os.environ.get("FEDERATED_USER_PASSWORD", "")
 SERVER_API = f"{BASE_URL}/api/server/v1"
 TENANT_API = f"{BASE_URL}/t/{TENANT_DOMAIN}/api/server/v1"
 TENANT_SCIM = f"{BASE_URL}/t/{TENANT_DOMAIN}/scim2"
+
+# ─── Primary IS callbacks ────────────────────────────────────────────────────
+# The federated IdP redirects back to the PRIMARY IS commonauth endpoints. Same
+# env var and default as setup_is.py and the services use, so one setting drives
+# every host.
+IS_BASE_URL = os.environ.get("IS_BASE_URL", "https://localhost:9443").rstrip("/")
+
+# Containerised app services reach a host-run primary IS as host.docker.internal,
+# so the same paths on that hostname stay accepted.
+_IS_URL_PARTS = urlparse(IS_BASE_URL)
+_DOCKER_INTERNAL_NETLOC = "host.docker.internal" + (f":{_IS_URL_PARTS.port}" if _IS_URL_PARTS.port else "")
+DOCKER_INTERNAL_IS_BASE_URL = _IS_URL_PARTS._replace(netloc=_DOCKER_INTERNAL_NETLOC).geturl()
+
+
+def _commonauth_callback_regexp(base_urls):
+    """Build the WSO2 ``regexp=`` callback covering commonauth on each base URL.
+
+    The base URLs are run through re.escape() because the value is a regular
+    expression — an unescaped `.` in a hostname would match any character. The
+    `/o/.*/commonauth` wildcard (the organization id) is an intentional pattern
+    and is therefore left unescaped.
+    """
+    alternatives = []
+    for base_url in base_urls:
+        escaped = re.escape(base_url)
+        alternatives.append(f"{escaped}/commonauth.*")
+        alternatives.append(f"{escaped}/o/.*/commonauth.*")
+    return "regexp=(" + "|".join(alternatives) + ")"
+
+
+PRIMARY_CALLBACK_URLS = [_commonauth_callback_regexp([IS_BASE_URL])]
+# The final OIDC update widens the set to the container-facing hostname too.
+PRIMARY_CALLBACK_URLS_WITH_DOCKER = [
+    _commonauth_callback_regexp(list(dict.fromkeys([IS_BASE_URL, DOCKER_INTERNAL_IS_BASE_URL])))
+]
 
 # ─── Branding (Worklink IdP login page) ──────────────────────────────────────
 # The federated IdP's hosted login page uses its own Worklink IdP assets so the
@@ -139,18 +180,11 @@ def _bootstrap_application(s):
     resp = s.post(f"{TENANT_API}/applications", auth=TENANT_ADMIN_AUTH, json={
         "name": "FederatedClient",
         "templateId": "b9c5e11e-fc78-484b-9bec-015d247561b8",
-        "claimConfiguration": {
-            "dialect": "LOCAL",
-            "requestedClaims": [
-                {"claim": {"uri": "http://wso2.org/claims/givenname"}},
-                {"claim": {"uri": "http://wso2.org/claims/lastname"}}
-            ],
-        },
         "inboundProtocolConfiguration": {
             "oidc": {
                 "grantTypes": ["authorization_code", "refresh_token"],
                 "allowedOrigins": [],
-                "callbackURLs": ["regexp=(https://localhost:9443/commonauth.*|https://localhost:9443/o/.*/commonauth.*)"],
+                "callbackURLs": PRIMARY_CALLBACK_URLS,
                 "publicClient": False,
                 "accessToken": {
                     "accessTokenAttributes": ["email"],
@@ -183,6 +217,8 @@ def _bootstrap_application_claims_and_oidc(s, app_id):
             "dialect": "LOCAL",
             "requestedClaims": [
                 {"claim": {"uri": "http://wso2.org/claims/emailaddress"}, "mandatory": False},
+                {"claim": {"uri": "http://wso2.org/claims/givenname"}, "mandatory": False},
+                {"claim": {"uri": "http://wso2.org/claims/lastname"}, "mandatory": False},
                 {"claim": {"uri": "http://wso2.org/claims/username"}, "mandatory": False},
                 {"claim": {"uri": "http://wso2.org/claims/groups"}, "mandatory": False},
             ],
@@ -211,7 +247,7 @@ def _bootstrap_application_claims_and_oidc(s, app_id):
         "clientId": client_id,
         "grantTypes": ["authorization_code", "refresh_token"],
         "allowedOrigins": [],
-        "callbackURLs": ["regexp=(https://localhost:9443/commonauth.*|https://localhost:9443/o/.*/commonauth.*)"],
+        "callbackURLs": PRIMARY_CALLBACK_URLS_WITH_DOCKER,
         "publicClient": False,
         "accessToken": {
             "accessTokenAttributes": ["email"],
@@ -357,7 +393,7 @@ USERS_TO_CREATE = [
 
 def bootstrap_federated_idp():
     s = _session()
-    print("Connecting to second IS instance at 9444...")
+    print(f"Connecting to second IS instance at {BASE_URL}...")
 
     _bootstrap_tenant(s)
     _bootstrap_branding(s)

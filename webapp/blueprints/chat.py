@@ -183,6 +183,9 @@ def send_message_stream(org_handle):
 
     payload = _build_agent_chat_payload_via_m2m(thread_id, message, user)
     headers = _agent_headers()
+    # Read outside generate(): the streaming body runs after the request
+    # context has been torn down, so current_app is gone by then.
+    verify_tls = current_app.config.get("SERVICE_VERIFY_TLS", True)
 
     def generate():
         try:
@@ -192,6 +195,7 @@ def send_message_stream(org_handle):
                 headers=headers,
                 stream=True,
                 timeout=30,
+                verify=verify_tls,
             )
             if resp.status_code != 200:
                 logger.error("FastAPI returned status %d: %s", resp.status_code, resp.text)
@@ -229,7 +233,12 @@ def clear_chat(org_handle):
     if thread_id:
         agent_url = current_app.config["AGENT_SERVICE_URL"]
         try:
-            requests.post(f"{agent_url}/clear/{thread_id}", headers=_agent_headers(), timeout=5)
+            requests.post(
+                f"{agent_url}/clear/{thread_id}",
+                headers=_agent_headers(),
+                timeout=5,
+                verify=current_app.config.get("SERVICE_VERIFY_TLS", True),
+            )
         except Exception as e:
             logger.warning("Failed to clear agent service state for thread %s: %s", thread_id, e)
 

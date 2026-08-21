@@ -1,6 +1,6 @@
 import os
 
-from common.config import CommonDefaults, load_env
+from common.config import CommonDefaults, load_env, verify_tls_from_env
 
 load_env()
 
@@ -25,7 +25,14 @@ class Config:
     IS_BASE_URL = os.getenv("IS_BASE_URL", CommonDefaults.IS_BASE_URL)
     IS_ORG_HANDLE = os.getenv("IS_ORG_HANDLE", "")
     TENANT_PATH = ""
-    IS_VERIFY_TLS = os.getenv("IS_VERIFY_TLS", "true").lower() != "false"
+    # bool, or a path to a CA bundle (see pki/). IS_VERIFY_TLS covers the OIDC
+    # client and every call to WSO2 IS; SERVICE_VERIFY_TLS covers the portal's
+    # calls to the Business API and the agent, which are HTTPS once those are
+    # served with certificates.
+    IS_VERIFY_TLS = verify_tls_from_env("IS_VERIFY_TLS", label="Web Portal -> WSO2 IS")
+    SERVICE_VERIFY_TLS = verify_tls_from_env(
+        "SERVICE_VERIFY_TLS", label="Web Portal -> internal services"
+    )
 
     CLIENT_ID = os.getenv("CLIENT_ID", "")
     CLIENT_SECRET = os.getenv("CLIENT_SECRET", "")
@@ -34,6 +41,14 @@ class Config:
 
     FLASK_HOST = os.getenv("FLASK_HOST", CommonDefaults.FLASK_HOST)
     FLASK_PORT = int(os.getenv("FLASK_PORT", str(CommonDefaults.FLASK_PORT)))
+
+    # Public origin of the portal, used to build the OIDC redirect and
+    # post-logout URIs. Derived from FLASK_HOST/FLASK_PORT so the existing
+    # localhost quickstart is unchanged, but settable outright because the
+    # scheme becomes https once the portal is served with a certificate, and
+    # these values must match the callback URLs registered by setup_is.py
+    # (which reads the same PORTAL_URL variable).
+    PORTAL_URL = os.getenv("PORTAL_URL", f"http://{FLASK_HOST}:{FLASK_PORT}").rstrip("/")
 
     BUSINESS_API_URL = os.getenv("BUSINESS_API_URL", CommonDefaults.BUSINESS_API_URL)
     AGENT_SERVICE_URL = os.getenv("AGENT_SERVICE_URL", CommonDefaults.AGENT_SERVICE_URL)
@@ -45,9 +60,6 @@ class Config:
     DEFAULT_LOGO_URL = os.getenv("DEFAULT_LOGO_URL", CommonDefaults.DEFAULT_LOGO_URL)
     DEFAULT_FAVICON_URL = os.getenv("DEFAULT_FAVICON_URL", CommonDefaults.DEFAULT_FAVICON_URL)
 
-    FEDERATED_IDP_URL = os.getenv("FEDERATED_IDP_URL", "https://localhost:9444/t/worklink.com/scim2/Users")
-    FEDERATED_IDP_ADMIN_USER = os.getenv("FEDERATED_IDP_ADMIN_USER", "teamspaceadmin@worklink.com")
-    FEDERATED_IDP_ADMIN_PASSWORD = os.environ.get("FEDERATED_IDP_ADMIN_PASSWORD", "")
 
     # OIDC_REDIRECT_URI and OIDC_POST_LOGOUT_URI are computed in create_app()
     # because they depend on FLASK_HOST / FLASK_PORT and may be overridden by tests.

@@ -1,7 +1,7 @@
 import os
 from typing import Optional
 
-from common.config import CommonDefaults, load_env
+from common.config import CommonDefaults, VerifyTLS, load_env, verify_tls_from_env
 
 load_env()
 
@@ -29,7 +29,8 @@ class Settings:
     ALLOWED_ORIGINS: list[str] = os.getenv(
         "ALLOWED_ORIGINS", "http://localhost:5001"
     ).split(",")
-    IS_VERIFY_TLS: bool = os.getenv("IS_VERIFY_TLS", "true").lower() != "false"
+    # bool, or a path to a CA bundle (see pki/ and common.config.resolve_verify_tls).
+    IS_VERIFY_TLS: VerifyTLS = verify_tls_from_env("IS_VERIFY_TLS", label="Business API -> WSO2 IS")
 
 
 settings = Settings()

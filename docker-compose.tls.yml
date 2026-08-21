@@ -1,0 +1,135 @@
+# TLS overlay for the Teamspace demo stack.
+#
+# Layered on top of docker-compose.yml so the base file stays runnable with no
+# certificates at all:
+#
+#   ./pki/generate.sh                       # once, creates pki/out/
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml up --build
+#
+# What it changes:
+#   * every service is served over HTTPS by gunicorn (including the Business
+#     API, which is not published to the host but still carries bearer tokens
+#     and OBO credentials between containers)
+#   * every hop verifies against the demo CA instead of skipping verification
+#   * the .test hostnames resolve to the host, so WSO2 IS is reachable under
+#     the same name the browser uses and the `iss` claim matches everywhere
+#
+# Requires in /etc/hosts on the host:
+#   127.0.0.1 identityserver.test secondaryidp.test flaskapp.test aiagent.test businessapi.test
+#
+# Certificates come from the repo's pki/ directory, mounted read-only at /pki.
+# The SANs cover the compose service name, localhost and the .test name, so
+# the same certificate is valid however the service is addressed.
+
+x-tls-env: &tls-env
+  # Deliberately NOT ${IS_VERIFY_TLS:-...}: .env holds the HOST path to the
+  # bundle (for start.sh runs), which does not exist inside the container.
+  # Inheriting it would silently break verification here. ./pki is always
+  # mounted at /pki by this overlay, so the container path is fixed.
+  IS_VERIFY_TLS: /pki/out/ca-bundle.crt
+  SERVICE_VERIFY_TLS: /pki/out/ca-bundle.crt
+  IS_BASE_URL: ${IS_BASE_URL:-https://identityserver.test:9443}
+
+x-host-aliases: &host-aliases
+  # WSO2 IS runs on the host, not in compose, and must be reachable under the
+  # SAME name the browser uses — the `iss` claim is built from it.
+  #
+  # `host-gateway` is correct on Docker Desktop. On Rancher Desktop / Lima it
+  # resolves to the bridge gateway INSIDE the VM (172.17.0.1), where nothing is
+  # listening, and connections are refused. There, set HOST_GATEWAY_IP to the
+  # address host.docker.internal points at:
+  #
+  #   docker compose exec webapp getent hosts host.docker.internal   # e.g. 192.168.5.2
+  #
+  # extra_hosts needs an IP or the literal "host-gateway", so this cannot just
+  # be aliased to host.docker.internal.
+  - "identityserver.test:${HOST_GATEWAY_IP:-host-gateway}"
+  - "secondaryidp.test:${HOST_GATEWAY_IP:-host-gateway}"
+
+services:
+  business-api:
+    command:
+      - gunicorn
+      - api.main:app
+      - --worker-class=uvicorn.workers.UvicornWorker
+      - --workers=4
+      - --bind=0.0.0.0:9091
+      # UvicornWorker picks gunicorn's certfile/keyfile up as its ssl_* options.
+      - --certfile=/pki/out/businessapi/businessapi.fullchain.pem
+      - --keyfile=/pki/out/businessapi/businessapi.key
+    environment:
+      <<: *tls-env
+    extra_hosts: *host-aliases
+    volumes:
+      - ./pki:/pki:ro
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --cacert
+        - /pki/out/ca-bundle.crt
+        - https://localhost:9091/health
+
+  ai-agent:
+    command:
+      - gunicorn
+      - agent.main:app
+      - --worker-class=uvicorn.workers.UvicornWorker
+      - --workers=4
+      - --bind=0.0.0.0:8000
+      - --certfile=/pki/out/aiagent/aiagent.fullchain.pem
+      - --keyfile=/pki/out/aiagent/aiagent.key
+    environment:
+      <<: *tls-env
+      BUSINESS_API_URL: https://business-api:9091
+      # Opened by the BROWSER for the OBO consent popup, so it must be a name
+      # the host resolves and a port published below.
+      AGENT_SERVICE_URL: ${AGENT_SERVICE_URL:-https://aiagent.test:8000}
+      AGENT_REDIRECT_URI: ${AGENT_REDIRECT_URI:-https://aiagent.test:8000/callback}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://flaskapp.test:5001}
+    extra_hosts: *host-aliases
+    volumes:
+      - ./pki:/pki:ro
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --cacert
+        - /pki/out/ca-bundle.crt
+        - https://localhost:8000/health
+
+  webapp:
+    command:
+      - gunicorn
+      - webapp.app:create_app()
+      - --workers=4
+      - --bind=0.0.0.0:5001
+      - --certfile=/pki/out/flaskapp/flaskapp.fullchain.pem
+      - --keyfile=/pki/out/flaskapp/flaskapp.key
+    environment:
+      <<: *tls-env
+      BUSINESS_API_URL: https://business-api:9091
+      AGENT_SERVICE_URL: https://ai-agent:8000
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://flaskapp.test:5001}
+      # Drives OIDC_REDIRECT_URI / OIDC_POST_LOGOUT_URI in the app factory, and
+      # must match the callback URLs setup_is.py registered — which reads this
+      # same variable, so set it once in .env and both agree.
+      PORTAL_URL: ${PORTAL_URL:-https://flaskapp.test:5001}
+    extra_hosts: *host-aliases
+    volumes:
+      - ./pki:/pki:ro
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --cacert
+        - /pki/out/ca-bundle.crt
+        - https://localhost:5001/health

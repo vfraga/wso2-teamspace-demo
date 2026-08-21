@@ -33,7 +33,9 @@ DEFAULT_DST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wso
 
 # ─── API Setup Configuration ──────────────────────────────────────────────────
 
-BASE_URL = "https://localhost:9444"
+# Only the hostname is configurable: the port stays 9444, it comes from the
+# port offset written into the secondary instance's deployment.toml below.
+BASE_URL = os.environ.get("FEDERATED_IS_BASE_URL", "https://localhost:9444").rstrip("/")
 SUPER_ADMIN_USERNAME = os.environ.get("IS_SUPER_ADMIN_USERNAME", "admin")
 SUPER_ADMIN_PASSWORD = os.environ.get("IS_SUPER_ADMIN_PASSWORD", "")
 if not SUPER_ADMIN_PASSWORD:

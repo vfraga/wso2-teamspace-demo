@@ -147,7 +147,8 @@ async def _call_business_api(
     url = f"{settings.BUSINESS_API_URL}{path}"
     headers = {"Authorization": f"Bearer {token}"}
     method_upper = method.upper()
-    async with httpx.AsyncClient(verify=settings.IS_VERIFY_TLS, timeout=_BUSINESS_API_TIMEOUT) as client:
+    # Business API, not WSO2 IS — verified against SERVICE_VERIFY_TLS.
+    async with httpx.AsyncClient(verify=settings.SERVICE_VERIFY_TLS, timeout=_BUSINESS_API_TIMEOUT) as client:
         if method_upper == "GET":
             return await client.get(url, headers=headers, follow_redirects=True)
         if method_upper == "POST":

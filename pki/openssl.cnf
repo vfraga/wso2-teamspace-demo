@@ -1,0 +1,67 @@
+# Minimal OpenSSL config for the Teamspace demo CA.
+#
+# One root CA, no intermediates, no CRL, no OCSP, no client certs. It exists
+# only so the demo can run with TLS verification ENABLED instead of passing
+# verify=False everywhere. Do not copy this into anything real.
+#
+# All state lives under pki/out/ so `rm -rf out` is a complete reset.
+
+[ca]
+default_ca = ca_root
+
+[ca_root]
+dir               = out/root_ca
+database          = $dir/index.txt
+serial            = $dir/serial
+new_certs_dir     = $dir/newcerts
+private_key       = $dir/private/ca.key
+certificate       = $dir/ca.crt
+default_md        = sha256
+default_days      = 825
+preserve          = no
+email_in_dn       = no
+rand_serial       = no
+# unique_subject=no lets a name be re-issued without wiping index.txt, which
+# matters when someone regenerates a single host cert during the demo.
+unique_subject    = no
+policy            = policy_loose
+copy_extensions   = none
+
+# The demo only ever sets CN; everything else is noise we do not want to be
+# forced to match against the CA's own DN.
+[policy_loose]
+countryName             = optional
+stateOrProvinceName     = optional
+localityName            = optional
+organizationName        = optional
+organizationalUnitName  = optional
+commonName              = supplied
+emailAddress            = optional
+
+[req]
+default_bits        = 2048
+default_md          = sha256
+prompt              = no
+distinguished_name  = req_distinguished_name
+string_mask         = utf8only
+
+[req_distinguished_name]
+O  = Teamspace Demo
+CN = Teamspace Demo
+
+[v3_ca]
+basicConstraints       = critical, CA:true
+keyUsage               = critical, keyCertSign, cRLSign
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always
+
+[server_cert]
+basicConstraints       = CA:false
+keyUsage               = critical, digitalSignature, keyEncipherment
+extendedKeyUsage       = serverAuth
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+# SAN is injected per-certificate by generate.sh. Java (WSO2 IS) ignores CN for
+# hostname verification entirely, so a cert without the right SAN entry fails
+# with "HTTPS hostname wrong" no matter what the subject says.
+subjectAltName         = $ENV::SAN

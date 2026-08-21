@@ -1,7 +1,7 @@
 import os
 from typing import Optional
 
-from common.config import CommonDefaults, load_env
+from common.config import CommonDefaults, VerifyTLS, load_env, verify_tls_from_env
 from common.logging_setup import is_production
 from common.m2m_auth import M2MConfig, ServiceTokenClient
 
@@ -34,7 +34,15 @@ class Settings:
         "ALLOWED_ORIGINS", "http://localhost:5001"
     ).split(",")
     MOCK_LLM: bool = os.getenv("MOCK_LLM", "false").lower() == "true"
-    IS_VERIFY_TLS: bool = os.getenv("IS_VERIFY_TLS", "true").lower() != "false"
+    # Both accept a bool or a path to a CA bundle. IS_VERIFY_TLS covers calls to
+    # WSO2 IS; SERVICE_VERIFY_TLS covers the agent -> Business API hop, which is
+    # HTTPS whenever the Business API is served with a certificate. They are
+    # separate settings because the two can legitimately have different trust:
+    # WSO2 might use a corporate CA while our own services use the demo CA.
+    IS_VERIFY_TLS: VerifyTLS = verify_tls_from_env("IS_VERIFY_TLS", label="AI Agent -> WSO2 IS")
+    SERVICE_VERIFY_TLS: VerifyTLS = verify_tls_from_env(
+        "SERVICE_VERIFY_TLS", label="AI Agent -> Business API"
+    )
 
     # HMAC key for the agent's OAuth `state` JWT. It must be stable and shared
     # across every agent instance: /authorize signs the state and /callback
