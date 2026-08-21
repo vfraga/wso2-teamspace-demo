@@ -185,7 +185,7 @@ def send_message_stream(org_handle):
     headers = _agent_headers()
     # Read outside generate(): the streaming body runs after the request
     # context has been torn down, so current_app is gone by then.
-    verify_tls = current_app.config.get("SERVICE_VERIFY_TLS", True)
+    verify_tls = current_app.config.get("SERVICE_VERIFY_TLS", False)
 
     def generate():
         try:
@@ -237,7 +237,7 @@ def clear_chat(org_handle):
                 f"{agent_url}/clear/{thread_id}",
                 headers=_agent_headers(),
                 timeout=5,
-                verify=current_app.config.get("SERVICE_VERIFY_TLS", True),
+                verify=current_app.config.get("SERVICE_VERIFY_TLS", False),
             )
         except Exception as e:
             logger.warning("Failed to clear agent service state for thread %s: %s", thread_id, e)

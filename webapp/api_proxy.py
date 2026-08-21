@@ -29,7 +29,7 @@ def api_request(method: str, path: str, token: str = None, **kwargs) -> requests
         # The Business API is HTTPS whenever it is served with a certificate,
         # and this hop carries the user's bearer token — so it is verified like
         # any other, against the CA bundle in SERVICE_VERIFY_TLS when set.
-        kwargs.setdefault("verify", current_app.config.get("SERVICE_VERIFY_TLS", True))
+        kwargs.setdefault("verify", current_app.config.get("SERVICE_VERIFY_TLS", False))
         resp = requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
         if resp.status_code >= 400:
             logger.error("Business API error: %s %s -> %s: %s", method.upper(), path, resp.status_code, resp.text[:200])

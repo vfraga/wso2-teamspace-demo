@@ -32,7 +32,7 @@ def init_oauth(app) -> None:
     # effect on the OIDC path at all — including in production, and including
     # the JWKS the id_token signature is checked against. Verifying a signature
     # with keys pulled over an unauthenticated channel is not verification.
-    verify_tls = app.config.get("IS_VERIFY_TLS", True)
+    verify_tls = app.config.get("IS_VERIFY_TLS", False)
     if not verify_tls:
         logger.warning(
             "TLS verification is DISABLED for the WSO2 IS OIDC client (IS_VERIFY_TLS=false). "
@@ -180,7 +180,7 @@ def _fetch_jwks(is_base: str, tenant_path: str) -> dict:
     """Fetch the IdP's JWKS, honouring IS_VERIFY_TLS."""
     resp = requests.get(
         jwks_url(is_base, tenant_path),
-        verify=current_app.config.get("IS_VERIFY_TLS", True),
+        verify=current_app.config.get("IS_VERIFY_TLS", False),
         timeout=5,
     )
     resp.raise_for_status()

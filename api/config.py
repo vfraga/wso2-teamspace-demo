@@ -30,7 +30,10 @@ class Settings:
         "ALLOWED_ORIGINS", "http://localhost:5001"
     ).split(",")
     # bool, or a path to a CA bundle (see pki/ and common.config.resolve_verify_tls).
-    IS_VERIFY_TLS: VerifyTLS = verify_tls_from_env("IS_VERIFY_TLS", label="Business API -> WSO2 IS")
+    IS_VERIFY_TLS: VerifyTLS = verify_tls_from_env(
+        "IS_VERIFY_TLS", label="Business API -> WSO2 IS",
+        default=CommonDefaults.IS_VERIFY_TLS,
+    )
 
 
 settings = Settings()

@@ -39,9 +39,13 @@ class Settings:
     # HTTPS whenever the Business API is served with a certificate. They are
     # separate settings because the two can legitimately have different trust:
     # WSO2 might use a corporate CA while our own services use the demo CA.
-    IS_VERIFY_TLS: VerifyTLS = verify_tls_from_env("IS_VERIFY_TLS", label="AI Agent -> WSO2 IS")
+    IS_VERIFY_TLS: VerifyTLS = verify_tls_from_env(
+        "IS_VERIFY_TLS", label="AI Agent -> WSO2 IS",
+        default=CommonDefaults.IS_VERIFY_TLS,
+    )
     SERVICE_VERIFY_TLS: VerifyTLS = verify_tls_from_env(
-        "SERVICE_VERIFY_TLS", label="AI Agent -> Business API"
+        "SERVICE_VERIFY_TLS", label="AI Agent -> Business API",
+        default=CommonDefaults.SERVICE_VERIFY_TLS,
     )
 
     # HMAC key for the agent's OAuth `state` JWT. It must be stable and shared

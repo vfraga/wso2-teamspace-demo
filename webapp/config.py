@@ -29,9 +29,13 @@ class Config:
     # client and every call to WSO2 IS; SERVICE_VERIFY_TLS covers the portal's
     # calls to the Business API and the agent, which are HTTPS once those are
     # served with certificates.
-    IS_VERIFY_TLS = verify_tls_from_env("IS_VERIFY_TLS", label="Web Portal -> WSO2 IS")
+    IS_VERIFY_TLS = verify_tls_from_env(
+        "IS_VERIFY_TLS", label="Web Portal -> WSO2 IS",
+        default=CommonDefaults.IS_VERIFY_TLS,
+    )
     SERVICE_VERIFY_TLS = verify_tls_from_env(
-        "SERVICE_VERIFY_TLS", label="Web Portal -> internal services"
+        "SERVICE_VERIFY_TLS", label="Web Portal -> internal services",
+        default=CommonDefaults.SERVICE_VERIFY_TLS,
     )
 
     CLIENT_ID = os.getenv("CLIENT_ID", "")

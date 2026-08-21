@@ -41,30 +41,38 @@ def resolve_verify_tls(raw: str | None, *, label: str, default: bool = True) -> 
     back to `False` would turn it into a silent downgrade to no verification.
     We fail closed to `True` instead, so the failure surfaces as a loud TLS
     error rather than an unverified connection.
+
+    Landing on `False` is warned about however it happened — an explicit
+    `false` or a `default=False` with nothing set — because "no verification"
+    is never something a reader should have to infer from silence.
     """
-    if raw is None:
-        return default
-    value = raw.strip()
-    if not value:
-        return default
-    lowered = value.lower()
-    if lowered in _TRUE_VALUES:
-        return True
-    if lowered in _FALSE_VALUES:
+    value = (raw or "").strip()
+    if value:
+        lowered = value.lower()
+        if lowered in _TRUE_VALUES:
+            return True
+        if lowered not in _FALSE_VALUES:
+            if not Path(value).is_file():
+                logger.error(
+                    "%s: CA bundle %r does not exist. Falling back to full verification, which "
+                    "will fail against a privately-signed certificate — fix the path (see pki/).",
+                    label, value,
+                )
+                return True
+            logger.info("%s: verifying TLS against CA bundle %s", label, value)
+            return value
+        resolved = False
+    else:
+        resolved = default
+
+    if resolved is False:
         logger.warning(
-            "%s: TLS verification is DISABLED. Expected only for local development "
-            "against a self-signed certificate; never set this in production.", label,
+            "%s: TLS verification is DISABLED. Expected for the local demo, which runs "
+            "against self-signed or demo-CA certificates that certifi does not trust; "
+            "set it to true, or to the path of a CA bundle (see pki/), for anything else.",
+            label,
         )
-        return False
-    if not Path(value).is_file():
-        logger.error(
-            "%s: CA bundle %r does not exist. Falling back to full verification, which "
-            "will fail against a privately-signed certificate — fix the path (see pki/).",
-            label, value,
-        )
-        return True
-    logger.info("%s: verifying TLS against CA bundle %s", label, value)
-    return value
+    return resolved
 
 
 def verify_tls_from_env(name: str, *, label: str, default: bool = True) -> VerifyTLS:
@@ -92,7 +100,20 @@ class CommonDefaults:
     """
 
     IS_BASE_URL = "https://localhost:9443"
+    # Off by default: the quickstart points at WSO2's self-signed localhost
+    # certificate, which certifi does not sign, so verifying by default would
+    # break `bash start.sh` at OIDC discovery. Point it at pki/out/ca-bundle.crt
+    # (or set true) for anything past the local demo.
     IS_VERIFY_TLS = False
+    # Off for the same reason, and deliberately symmetric with it. The internal
+    # hops are plain HTTP in the quickstart, where `verify` is ignored outright,
+    # so this changes nothing there. It matters under TLS_CERT_DIR, where the
+    # hops become HTTPS on demo-CA certificates that certifi does not trust:
+    # `True` would fail the handshake for a stack that is otherwise correct.
+    # Safe to default off only because resolve_verify_tls warns whenever it
+    # lands on "no verification" — set it to pki/out/ca-bundle.crt to silence
+    # that warning and actually verify.
+    SERVICE_VERIFY_TLS = False
     FLASK_HOST = "localhost"
     FLASK_PORT = 5001
     BUSINESS_API_URL = "http://localhost:9091"

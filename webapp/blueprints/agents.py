@@ -152,9 +152,13 @@ def add_agent(org_handle):
     # because agents reside in the AGENT userstore which is only accessible at the root level.
     root_token = get_root_role_management_token()
     if root_token and agent_id:
+        # The ROOT tenant path, from IS_ORG_HANDLE — not the sub-organization the
+        # request is scoped to. Was hardcoded to "/t/teamspace", which silently
+        # targeted the wrong tenant on any deployment that renamed the root.
+        root_tenant_path = current_app.config.get("TENANT_PATH", "")
         logger.info("Assigning TEAMSPACE_USER role to agent at root level: agent_id=%s", agent_id)
         assign_roles_to_user(
-            is_client, root_token, "/t/teamspace", agent_id,
+            is_client, root_token, root_tenant_path, agent_id,
             [TEAMSPACE_USER], api_debug_list, use_org_endpoint=False
         )
 

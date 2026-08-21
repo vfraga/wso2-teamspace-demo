@@ -9,7 +9,7 @@ verification, so that case is pinned here.
 
 import pytest
 
-from common.config import resolve_verify_tls
+from common.config import CommonDefaults, resolve_verify_tls
 
 
 @pytest.mark.parametrize("raw", ["true", "True", "TRUE", "1", "yes", "on"])
@@ -56,6 +56,36 @@ def test_disabling_verification_is_logged_as_a_warning(caplog):
         resolve_verify_tls("false", label="Web Portal -> WSO2 IS")
     assert "DISABLED" in caplog.text
     assert "Web Portal -> WSO2 IS" in caplog.text
+
+
+def test_defaulting_to_off_is_warned_about_too(caplog):
+    # IS_VERIFY_TLS defaults to off (CommonDefaults), because the quickstart
+    # points at WSO2's self-signed certificate. That must still say so out loud:
+    # an unset variable is exactly the case where nobody has thought about it.
+    with caplog.at_level("WARNING"):
+        assert resolve_verify_tls(None, label="AI Agent -> WSO2 IS", default=False) is False
+    assert "DISABLED" in caplog.text
+    assert "AI Agent -> WSO2 IS" in caplog.text
+
+
+def test_defaulting_to_on_is_not_warned_about(caplog):
+    with caplog.at_level("WARNING"):
+        assert resolve_verify_tls(None, label="test", default=True) is True
+    assert "DISABLED" not in caplog.text
+
+
+def test_both_quickstart_defaults_are_off_and_symmetric():
+    # Deliberate, and the reason differs per variable:
+    #   IS_VERIFY_TLS      — WSO2's self-signed certificate; True breaks OIDC
+    #                        discovery on `bash start.sh` out of the box.
+    #   SERVICE_VERIFY_TLS — inert over the quickstart's plain-HTTP hops, but
+    #                        under TLS_CERT_DIR those hops carry demo-CA certs
+    #                        that certifi does not trust, so True fails the
+    #                        handshake on an otherwise correct stack.
+    # Off is only acceptable because resolving to off is always warned about;
+    # pinned here so the pair cannot drift apart again.
+    assert CommonDefaults.IS_VERIFY_TLS is False
+    assert CommonDefaults.SERVICE_VERIFY_TLS is False
 
 
 def test_a_directory_is_not_accepted_as_a_bundle(tmp_path):

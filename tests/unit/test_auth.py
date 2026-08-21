@@ -2,6 +2,7 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
+from common.config import CommonDefaults
 from webapp.auth import init_oauth, oauth
 
 
@@ -61,10 +62,13 @@ def test_tls_verification_follows_is_verify_tls(configured):
     assert kwargs["client_kwargs"]["verify"] is configured
 
 
-def test_tls_verification_defaults_to_on_when_unconfigured():
-    # Fail closed: an absent setting must not silently disable verification.
+def test_tls_verification_defaults_to_the_documented_default_when_unconfigured():
+    # Asserted against CommonDefaults, not a literal: there is ONE default for
+    # this setting and every in-app fallback must name it, or the code ends up
+    # contradicting the README. Disabling is never silent — resolution logs a
+    # warning at startup either way (tests/unit/test_verify_tls_config.py).
     kwargs = _register_kwargs(_app_config())
-    assert kwargs["client_kwargs"]["verify"] is True
+    assert kwargs["client_kwargs"]["verify"] is CommonDefaults.IS_VERIFY_TLS
 
 
 def test_disabling_tls_verification_is_logged_as_a_warning(caplog):

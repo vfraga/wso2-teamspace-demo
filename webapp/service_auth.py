@@ -28,7 +28,7 @@ def _config() -> M2MConfig:
         tenant_path=cfg.get("TENANT_PATH", ""),
         client_id=cfg.get("CLIENT_ID", ""),
         client_secret=cfg.get("CLIENT_SECRET", ""),
-        verify_tls=cfg.get("IS_VERIFY_TLS", True),
+        verify_tls=cfg.get("IS_VERIFY_TLS", False),
     )
 
 

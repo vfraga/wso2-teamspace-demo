@@ -102,9 +102,9 @@ services:
         condition: service_healthy
       business-api:
         condition: service_healthy
-    # Not published. NOTE: the OBO consent popup is opened by the *browser*
-    # against AGENT_REDIRECT_URI, so if you demo that flow through compose you
-    # must publish this port and set AGENT_REDIRECT_URI to match.
+    # Published, unlike the Business API: the OBO consent popup is opened by the
+    # *browser* against AGENT_REDIRECT_URI, which cannot reach the compose
+    # network. Keep AGENT_REDIRECT_URI on a name the host resolves.
     ports:
       - "8000:8000"
     healthcheck:
