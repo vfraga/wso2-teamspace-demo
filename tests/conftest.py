@@ -299,7 +299,7 @@ def live_server_env():
             except Exception:
                 pass
                 
-    # 3. Create temp directory and clone WSO2 IS 7.2.0.24
+    # 3. Create temp directory and clone the WSO2 IS template
     temp_dir = tempfile.mkdtemp(prefix="wso2_e2e_")
     src_wso2 = os.getenv("WSO2_IS_TEMPLATE_PATH")
     if not src_wso2:
@@ -307,12 +307,15 @@ def live_server_env():
         pytest.skip("WSO2_IS_TEMPLATE_PATH env var is required for live E2E tests")
     
     # Clone Primary Instance
-    dst_wso2 = os.path.join(temp_dir, "wso2is-7.2.0.24")
-    print(f"[live_server_env] Cloning primary WSO2 IS 7.2.0.24 to {dst_wso2}...")
+    # Named after the template directory rather than a pinned version, which
+    # goes stale every time the WSO2 install is upgraded.
+    template_name = os.path.basename(src_wso2.rstrip("/")) or "wso2is"
+    dst_wso2 = os.path.join(temp_dir, template_name)
+    print(f"[live_server_env] Cloning primary WSO2 IS to {dst_wso2}...")
     subprocess.run(["cp", "-R", src_wso2, dst_wso2], check=True)
     
     # Clone Federated IdP Instance
-    dst_wso2_idp = os.path.join(temp_dir, "wso2is-7.2.0.24-idp")
+    dst_wso2_idp = os.path.join(temp_dir, f"{template_name}-idp")
     print(f"[live_server_env] Cloning second WSO2 IS (IdP) to {dst_wso2_idp}...")
     subprocess.run(["cp", "-R", src_wso2, dst_wso2_idp], check=True)
 
@@ -476,8 +479,11 @@ def live_server_env():
         "BUSINESS_API_URL": "http://localhost:9091",
         "AGENT_SERVICE_URL": "http://localhost:8000",
         "MOCK_LLM": "true",
-        "IS_ADMIN_USERNAME": "teamspaceadmin@teamspace",
-        "IS_ADMIN_PASSWORD": "Admin123",
+        # Root-tenant admin for the one management call with no /o equivalent.
+        # Derived from the same variables setup_is.py provisions the account
+        # with, so the fixture cannot disagree with the tenant it just created.
+        "IS_ADMIN_USERNAME": f"teamspaceadmin@{os.environ.get('IS_ORG_HANDLE', 'teamspace')}",
+        "IS_ADMIN_PASSWORD": os.environ.get("IS_TENANT_ADMIN_PASSWORD", "Admin123"),
     }
     
     python_bin = sys.executable

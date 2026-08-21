@@ -1,0 +1,48 @@
+#!/bin/bash
+# Block absolute home-directory paths from being committed.
+#
+# setup_secondary_is.py once shipped with its author's home directory as a
+# default value. A repo-wide unit test could catch that, but only after the
+# commit already existed and only when someone ran the suite — this is the
+# layer that actually stops it.
+#
+# Enable in a fresh clone:
+#   git config core.hooksPath .githooks
+#
+# Bypass for a deliberate exception:
+#   git commit --no-verify
+#
+# Plain `while read` rather than mapfile/readarray: macOS ships bash 3.2, where
+# those do not exist. Keep this file bash-3.2 clean.
+
+set -uo pipefail
+
+PATTERN='(/Users/|/home/)[a-z]'
+FOUND=0
+
+# Staged CONTENT, not the working tree: a partially-staged file must be judged
+# by what is actually going in. -z/IFS= so paths with spaces survive.
+while IFS= read -r -d '' file; do
+    case "$file" in
+        *.lock|.githooks/*) continue ;;
+    esac
+    # -I so binary blobs are skipped rather than reported as matches.
+    if git show ":$file" 2>/dev/null | grep -qIE "$PATTERN"; then
+        if [ "$FOUND" -eq 0 ]; then
+            echo "pre-commit: absolute home-directory path in staged content:" >&2
+            FOUND=1
+        fi
+        echo >&2
+        echo "  $file" >&2
+        git show ":$file" | grep -nIE "$PATTERN" | head -5 | sed 's/^/    /' >&2
+    fi
+done < <(git diff --cached --name-only --diff-filter=ACM -z)
+
+if [ "$FOUND" -ne 0 ]; then
+    echo >&2
+    echo "Read it from the environment instead (see WSO2_IS_TEMPLATE_PATH in .env.example)." >&2
+    echo "Deliberate exception: git commit --no-verify" >&2
+    exit 1
+fi
+
+exit 0

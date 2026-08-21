@@ -20,6 +20,7 @@ from common import rate_limit
 from common.jwt_validation import token_issuer
 from common.logging_setup import configure_logging, is_production
 from common.m2m_auth import SERVICE_AUTH_HEADER, make_service_auth_dependency
+from common.constants import DEFAULT_AGENT_NAME
 from common.safe_auth_logger import mask_token
 from agent.config import settings
 from agent.gemini_agent import run_agent, run_agent_stream
@@ -257,7 +258,7 @@ async def chat(req: ChatRequest):
             gemini_api_key=req.gemini_api_key or "",
             custom_prompt=req.custom_prompt or "",
             language=req.language or "en",
-            agent_name=req.agent_name or "Worklink Assistant",
+            agent_name=req.agent_name or DEFAULT_AGENT_NAME,
         )
     except Exception as e:
         response_text = _map_exception_to_user_message(e, req.thread_id)
@@ -298,7 +299,7 @@ async def chat_stream(req: ChatRequest):
                 gemini_api_key=req.gemini_api_key or "",
                 custom_prompt=req.custom_prompt or "",
                 language=req.language or "en",
-                agent_name=req.agent_name or "Worklink Assistant",
+                agent_name=req.agent_name or DEFAULT_AGENT_NAME,
             ):
                 full_response_text += chunk
                 yield chunk

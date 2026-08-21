@@ -1,6 +1,8 @@
 from typing import Optional
 from pydantic import BaseModel
 
+from common.constants import DEFAULT_AGENT_NAME
+
 
 class ChatRequest(BaseModel):
     thread_id: str
@@ -11,7 +13,7 @@ class ChatRequest(BaseModel):
     gemini_api_key: Optional[str] = None
     custom_prompt: Optional[str] = None
     language: Optional[str] = "en"
-    agent_name: Optional[str] = "Worklink Assistant"
+    agent_name: Optional[str] = DEFAULT_AGENT_NAME
 
 
 class ChatResponse(BaseModel):

@@ -28,8 +28,16 @@ load_dotenv()
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
-DEFAULT_SRC_PATH = "/Users/viniciusf/work/identity_server/fresh_installs/wso2is-7.2.0.24"
-DEFAULT_DST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wso2is-7.2.0.24-secondary")
+# No default: the template is a multi-GB WSO2 install that only the operator can
+# point us at, and a fallback path is either wrong or someone's home directory.
+# An unset value fails in setup_directory() with the message that says so.
+DEFAULT_SRC_PATH = os.environ.get("WSO2_IS_TEMPLATE_PATH", "")
+# Named after whatever the source is called, so the copy does not pin a WSO2
+# version that goes stale the next time the template is upgraded.
+DEFAULT_DST_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    (os.path.basename(DEFAULT_SRC_PATH.rstrip("/")) or "wso2is") + "-secondary",
+)
 
 # ─── API Setup Configuration ──────────────────────────────────────────────────
 
@@ -43,16 +51,11 @@ if not SUPER_ADMIN_PASSWORD:
     warnings.warn("IS_SUPER_ADMIN_PASSWORD not set — IS API calls will fail with 401", RuntimeWarning, stacklevel=2)
 SUPER_ADMIN_AUTH = (SUPER_ADMIN_USERNAME, SUPER_ADMIN_PASSWORD)
 
-TENANT_DOMAIN = "worklink.com"
-TENANT_ADMIN_USERNAME = "teamspaceadmin"
-TENANT_ADMIN_PASSWORD = os.environ.get("IS_TENANT_ADMIN_PASSWORD", "")
-FEDERATED_USER_PASSWORD = os.environ.get("FEDERATED_USER_PASSWORD", "")
-TENANT_ADMIN_EMAIL = "teamspaceadmin@mail.com"
-TENANT_ADMIN_AUTH = (f"{TENANT_ADMIN_USERNAME}@{TENANT_DOMAIN}", TENANT_ADMIN_PASSWORD)
-
+# The federated tenant's identity deliberately does NOT live here. This script
+# only prepares and starts the server; bootstrap_idp_config() below delegates to
+# setup_idp_server.bootstrap_federated_idp(), which reads FEDERATED_IDP_TENANT_*.
+# Local copies could only ever drift from the tenant actually being created.
 SERVER_API = f"{BASE_URL}/api/server/v1"
-TENANT_API = f"{BASE_URL}/t/{TENANT_DOMAIN}/api/server/v1"
-TENANT_SCIM = f"{BASE_URL}/t/{TENANT_DOMAIN}/scim2"
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -84,7 +87,7 @@ def _ok(resp, accept_codes=(200, 201)):
 def setup_directory():
     step(1, "Preparing secondary WSO2 IS directory")
     
-    src_wso2 = os.getenv("WSO2_IS_TEMPLATE_PATH", DEFAULT_SRC_PATH)
+    src_wso2 = DEFAULT_SRC_PATH
     dst_wso2 = DEFAULT_DST_PATH
     
     if not os.path.exists(src_wso2):

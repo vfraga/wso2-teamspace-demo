@@ -2,8 +2,8 @@
 """
 Teamspace IS Setup Script
 
-Creates the 'teamspace' tenant, application, API resources, roles,
-and sharing configuration in WSO2 IS 7.2.0.
+Creates the tenant (IS_ORG_HANDLE, default 'teamspace'), application, API
+resources, roles and sharing configuration in WSO2 IS 7.2.0.
 
 Idempotent: safe to run multiple times. Skips resources that already exist.
 
@@ -22,6 +22,7 @@ import requests
 from dotenv import load_dotenv
 from webapp.is_client import ISClient
 from common.config import CommonDefaults
+from common.constants import DEFAULT_PRIMARY_COLOR, DEFAULT_SECONDARY_COLOR
 from common.m2m_auth import SERVICE_SCOPE
 import urllib3
 
@@ -31,7 +32,7 @@ load_dotenv()
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
-SUPER_ADMIN_USERNAME = "admin"
+SUPER_ADMIN_USERNAME = os.environ.get("IS_SUPER_ADMIN_USERNAME", "admin")
 SUPER_ADMIN_PASSWORD = os.environ.get("IS_SUPER_ADMIN_PASSWORD", "")
 if not SUPER_ADMIN_PASSWORD:
     import warnings
@@ -56,12 +57,21 @@ APP_CALLBACK_URLS = [
     f"regexp=({re.escape(PORTAL_URL)}.*|{re.escape(AGENT_SERVICE_URL)}.*)"
 ]
 
-TENANT_DOMAIN = "teamspace"
-TENANT_ADMIN_USERNAME = "teamspaceadmin"
+# The SAME variable the three services read, so the tenant this script creates
+# and the tenant they look under cannot disagree. An empty handle means
+# carbon.super for the services, but setup still needs a domain to create the
+# tenant with — hence the `or` rather than a default argument.
+TENANT_DOMAIN = os.environ.get("IS_ORG_HANDLE") or "teamspace"
+TENANT_ADMIN_USERNAME = os.environ.get("IS_TENANT_ADMIN_USERNAME", "teamspaceadmin")
 TENANT_ADMIN_PASSWORD = os.environ.get("IS_TENANT_ADMIN_PASSWORD", "")
-TENANT_ADMIN_EMAIL = "teamspaceadmin@mail.com"
+# Deliberately NOT derived from TENANT_DOMAIN. This is the owner's email
+# *attribute*; the account is signed in to as TENANT_ADMIN_AUTH below, which is
+# where the domain does appear. Same split as setup_idp_server.py.
+TENANT_ADMIN_EMAIL = os.environ.get("IS_TENANT_ADMIN_EMAIL", "teamspaceadmin@mail.com")
 
-APP_NAME = "Teamspace"
+# Read by the portal too (webapp/config.py), which looks the application up by
+# this name — a literal here would make renaming it break that lookup.
+APP_NAME = os.getenv("APP_NAME", "Teamspace")
 
 ROLE_NAMES = {
     "admin": "teamspace-admin",
@@ -87,8 +97,8 @@ DEFAULT_FAVICON_URL = os.getenv("DEFAULT_FAVICON_URL", f"{CDN_IMG_BASE_URL}/team
 from webapp.is_operations import build_is_branding_payload
 
 BRANDING_PAYLOAD = build_is_branding_payload({
-    "primary_color": "#4F46E5",
-    "secondary_color": "#E0E7FF",
+    "primary_color": DEFAULT_PRIMARY_COLOR,
+    "secondary_color": DEFAULT_SECONDARY_COLOR,
     "logo_url": DEFAULT_LOGO_URL,
     "logo_alt_text": "Teamspace App Logo",
     "favicon_url": DEFAULT_FAVICON_URL
@@ -397,6 +407,9 @@ def enable_api_based_auth(s, app_id):
 def setup_api_resources(s, app_id):
     step(9, "API Resources & Authorizations")
 
+    # `identifier` is an opaque key, not a reachable URL. WSO2 matches an
+    # existing resource by it, so changing one registers a NEW resource rather
+    # than reusing the old — treat these as fixed once an instance is live.
     print("  Custom APIs:")
     meeting_scopes = [
         {"name": "list_meetings", "displayName": "List Meetings"},
@@ -407,7 +420,7 @@ def setup_api_resources(s, app_id):
         {"name": "view_agent_config", "displayName": "View Agent Config"},
         {"name": "manage_agent_config", "displayName": "Manage Agent Config"},
     ]
-    meeting_id = _create_api_resource(s, "Meeting Service", "http://localhost:9091", "Meeting Service API", meeting_scopes)
+    meeting_id = _create_api_resource(s, "Meeting Service", "urn:teamspace:meetings", "Meeting Service API", meeting_scopes)
     _authorize_api(s, app_id, meeting_id, ["create_meeting", "delete_meeting", "list_meetings", "update_meeting", "view_meeting", "view_agent_config", "manage_agent_config"])
 
     print("  MCP Meeting Agent API:")
@@ -426,7 +439,7 @@ def setup_api_resources(s, app_id):
         {"name": "update_branding", "displayName": "Update Branding"},
         {"name": "delete_branding", "displayName": "Delete Branding"},
     ]
-    pers_id = _create_api_resource(s, "Personalization Service", "http://localhost:9093", "Personalization Service API", personalization_scopes)
+    pers_id = _create_api_resource(s, "Personalization Service", "urn:teamspace:personalization", "Personalization Service API", personalization_scopes)
     _authorize_api(s, app_id, pers_id, ["create_advanced_branding", "create_basic_branding", "delete_branding", "update_branding"])
 
     print("  Internal Services API (M2M client credentials):")

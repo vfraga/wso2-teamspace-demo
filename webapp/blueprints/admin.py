@@ -37,7 +37,8 @@ def _resolve_teamspace_app_id(is_client, token, tenant_path, api_debug_list):
     if apps_res["status_code"] != 200 or not isinstance(apps_res.get("data"), dict):
         return None
     apps = apps_res["data"].get("applications", [])
-    teamspace_app = next((a for a in apps if a.get("name") == "Teamspace"), None)
+    app_name = current_app.config["APP_NAME"]
+    teamspace_app = next((a for a in apps if a.get("name") == app_name), None)
     return teamspace_app.get("id") if teamspace_app else None
 
 
@@ -432,7 +433,7 @@ def add_idp(org_handle):
     api_debug_list = []
 
     org_id = session.get("user", {}).get("org_id", "")
-    for role_name in ("teamspace-admin", "teamspace-user"):
+    for role_name in (TEAMSPACE_ADMIN, TEAMSPACE_USER):
         check_res = is_client.call(
             "GET",
             f"{tenant_path}/o/scim2/v2/Roles?filter=displayName+eq+{role_name}",
@@ -516,12 +517,12 @@ def add_idp(org_handle):
         },
         "roles": {
             "mappings": [
-                {"idpRole": "admin", "localRole": "teamspace-admin"},
-                {"idpRole": "user", "localRole": "teamspace-user"},
-                {"idpRole": "PRIMARY/admin", "localRole": "teamspace-admin"},
-                {"idpRole": "PRIMARY/user", "localRole": "teamspace-user"},
-                {"idpRole": f"{org_handle}/admin", "localRole": "teamspace-admin"},
-                {"idpRole": f"{org_handle}/user", "localRole": "teamspace-user"},
+                {"idpRole": "admin", "localRole": TEAMSPACE_ADMIN},
+                {"idpRole": "user", "localRole": TEAMSPACE_USER},
+                {"idpRole": "PRIMARY/admin", "localRole": TEAMSPACE_ADMIN},
+                {"idpRole": "PRIMARY/user", "localRole": TEAMSPACE_USER},
+                {"idpRole": f"{org_handle}/admin", "localRole": TEAMSPACE_ADMIN},
+                {"idpRole": f"{org_handle}/user", "localRole": TEAMSPACE_USER},
             ]
         },
         "provisioning": {
@@ -628,7 +629,8 @@ def _fetch_teamspace_login_flow(is_client, token: str, tenant_path: str) -> tupl
         return None, None, None
 
     apps = apps_res["data"].get("applications", [])
-    teamspace_app = next((a for a in apps if a.get("name") == "Teamspace"), None)
+    app_name = current_app.config["APP_NAME"]
+    teamspace_app = next((a for a in apps if a.get("name") == app_name), None)
     if not teamspace_app:
         return None, None, None
 

@@ -20,6 +20,19 @@ else
     RELOAD_EXCLUDES=""
 fi
 
+# FLASK_PORT is read by webapp/config.py to build PORTAL_URL, and therefore the
+# OIDC redirect URI registered by setup_is.py. Binding a different port here
+# than the app believes it is on produces "callback.not.match" at login, so the
+# one variable drives both.
+#
+# API_PORT/AGENT_PORT have no such counterpart: nothing derives a bind port from
+# BUSINESS_API_URL / AGENT_SERVICE_URL, so changing either of these means
+# updating that URL in .env too.
+FLASK_HOST="${FLASK_HOST:-localhost}"
+FLASK_PORT="${FLASK_PORT:-5001}"
+API_PORT="${API_PORT:-9091}"
+AGENT_PORT="${AGENT_PORT:-8000}"
+
 # TLS is opt-in: point TLS_CERT_DIR at the generated PKI material (pki/out)
 # and every service is served over HTTPS instead of plain HTTP. Left unset,
 # the quickstart in the README works with no certificates at all.
@@ -97,45 +110,45 @@ wait_for_health() {
     echo "WARNING: $name did not become healthy in 30s"
 }
 
-echo "Starting Business API on port 9091..."
+echo "Starting Business API on port $API_PORT..."
 if [ "$SERVE_MODE" = "production" ]; then
     ./.venv/bin/python3 -m gunicorn api.main:app \
         --worker-class uvicorn.workers.UvicornWorker \
-        --workers "$API_WORKERS" --bind 0.0.0.0:9091 $(gunicorn_tls_args businessapi) &
+        --workers "$API_WORKERS" --bind "0.0.0.0:$API_PORT" $(gunicorn_tls_args businessapi) &
 else
-    ./.venv/bin/python3 -m uvicorn api.main:app --host 0.0.0.0 --port 9091 --ws none $RELOAD_FLAG $RELOAD_EXCLUDES $(uvicorn_tls_args businessapi) &
+    ./.venv/bin/python3 -m uvicorn api.main:app --host 0.0.0.0 --port "$API_PORT" --ws none $RELOAD_FLAG $RELOAD_EXCLUDES $(uvicorn_tls_args businessapi) &
 fi
 API_PID=$!
 echo $API_PID > /tmp/teamspace_api.pid
-wait_for_health "$SCHEME://localhost:9091/health" "API"
+wait_for_health "$SCHEME://localhost:$API_PORT/health" "API"
 
-echo "Starting AI Agent Service on port 8000..."
+echo "Starting AI Agent Service on port $AGENT_PORT..."
 if [ "$SERVE_MODE" = "production" ]; then
     ./.venv/bin/python3 -m gunicorn agent.main:app \
         --worker-class uvicorn.workers.UvicornWorker \
-        --workers "$AGENT_WORKERS" --bind 0.0.0.0:8000 $(gunicorn_tls_args aiagent) &
+        --workers "$AGENT_WORKERS" --bind "0.0.0.0:$AGENT_PORT" $(gunicorn_tls_args aiagent) &
 else
-    ./.venv/bin/python3 -m uvicorn agent.main:app --host 0.0.0.0 --port 8000 --ws none $RELOAD_FLAG $RELOAD_EXCLUDES $(uvicorn_tls_args aiagent) &
+    ./.venv/bin/python3 -m uvicorn agent.main:app --host 0.0.0.0 --port "$AGENT_PORT" --ws none $RELOAD_FLAG $RELOAD_EXCLUDES $(uvicorn_tls_args aiagent) &
 fi
 AGENT_PID=$!
 echo $AGENT_PID > /tmp/teamspace_agent.pid
-wait_for_health "$SCHEME://localhost:8000/health" "agent"
+wait_for_health "$SCHEME://localhost:$AGENT_PORT/health" "agent"
 
-echo "Starting Flask Web App on port 5001..."
+echo "Starting Flask Web App on port $FLASK_PORT..."
 if [ "$SERVE_MODE" = "production" ]; then
     ./.venv/bin/python3 -m gunicorn "webapp.app:create_app()" \
-        --workers "$WEBAPP_WORKERS" --bind 0.0.0.0:5001 $(gunicorn_tls_args flaskapp) &
+        --workers "$WEBAPP_WORKERS" --bind "0.0.0.0:$FLASK_PORT" $(gunicorn_tls_args flaskapp) &
 else
-    FLASK_APP=webapp.app:create_app ./.venv/bin/python3 -m flask run --host 0.0.0.0 --port 5001 $DEBUG_FLAG $(flask_tls_args flaskapp) &
+    FLASK_APP=webapp.app:create_app ./.venv/bin/python3 -m flask run --host 0.0.0.0 --port "$FLASK_PORT" $DEBUG_FLAG $(flask_tls_args flaskapp) &
 fi
 WEBAPP_PID=$!
 echo $WEBAPP_PID > /tmp/teamspace_webapp.pid
 
 echo ""
 echo "All services started:"
-echo "  Web App:      $SCHEME://localhost:5001"
-echo "  Business API: $SCHEME://localhost:9091"
-echo "  AI Agent:     $SCHEME://localhost:8000"
+echo "  Web App:      $SCHEME://$FLASK_HOST:$FLASK_PORT"
+echo "  Business API: $SCHEME://localhost:$API_PORT"
+echo "  AI Agent:     $SCHEME://localhost:$AGENT_PORT"
 echo ""
 echo "Press Ctrl+C to stop all services."
 

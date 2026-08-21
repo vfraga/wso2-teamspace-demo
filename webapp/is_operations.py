@@ -14,11 +14,42 @@ from webapp.auth import get_client_credentials_token
 logger = logging.getLogger(__name__)
 
 
+#: Login name setup_is.py gives the tenant admin, and the same default it uses.
+_DEFAULT_TENANT_ADMIN_USERNAME = "teamspaceadmin"
+
+
+def _root_admin_credentials() -> tuple[str, str]:
+    """Login name and password for the ROOT-tenant admin.
+
+    Both halves fall back to the account setup_is.py provisions, so a stock demo
+    needs no extra configuration: IS_TENANT_ADMIN_PASSWORD is already required to
+    run setup at all. The password used to be hardcoded to "Admin123", which
+    silently 401'd every deployment that chose anything else.
+    """
+    org_handle = current_app.config.get("IS_ORG_HANDLE", "") if current_app else ""
+    username = os.getenv("IS_ADMIN_USERNAME")
+    if not username:
+        username = os.getenv("IS_TENANT_ADMIN_USERNAME", _DEFAULT_TENANT_ADMIN_USERNAME)
+        # An empty handle is carbon.super, where the name carries no tenant.
+        if org_handle:
+            username = f"{username}@{org_handle}"
+    password = os.getenv("IS_ADMIN_PASSWORD") or os.getenv("IS_TENANT_ADMIN_PASSWORD", "")
+    return username, password
+
+
 def _get_auth_params(token: str, use_org_endpoint: bool = True):
     if use_org_endpoint:
         return token, {}
-    admin_user = os.getenv("IS_ADMIN_USERNAME") or "teamspaceadmin@teamspace"
-    admin_pass = os.getenv("IS_ADMIN_PASSWORD") or "Admin123"
+    admin_user, admin_pass = _root_admin_credentials()
+    if not admin_pass:
+        # Send nothing rather than a credential we know is wrong: a bare 401
+        # says "no password" far more clearly than a rejected guess would.
+        logger.error(
+            "No password for root-tenant admin %r: set IS_ADMIN_PASSWORD (or "
+            "IS_TENANT_ADMIN_PASSWORD). This call has no /o equivalent, so it will 401.",
+            admin_user,
+        )
+        return None, {}
     credentials = f"{admin_user}:{admin_pass}"
     encoded = base64.b64encode(credentials.encode()).decode()
     return None, {"headers": {"Authorization": f"Basic {encoded}"}}
@@ -115,7 +146,7 @@ def share_roles_with_org(is_client: ISClient, root_token: str,
     """
     if not role_names:
         return
-    app_name = current_app.config.get("APP_NAME", "Teamspace")
+    app_name = current_app.config["APP_NAME"]
     app_id = current_app.config.get("APP_ID", "")
 
     roles_value = [

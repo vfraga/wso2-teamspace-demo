@@ -8,6 +8,7 @@ from datetime import datetime
 from google import genai
 from google.genai import types
 
+from common.constants import DEFAULT_AGENT_NAME
 from agent.tools import TOOL_DEFINITIONS, dispatch_tool
 from agent.config import settings
 from agent.state_manager import StateManager, FlowState
@@ -521,7 +522,7 @@ async def run_agent(
     gemini_api_key: str = "",
     custom_prompt: str = "",
     language: str = "en",
-    agent_name: str = "Worklink Assistant",
+    agent_name: str = DEFAULT_AGENT_NAME,
 ) -> str:
     # Check for authorization callback interception
     intercepted, response_text = await _handle_authorization_callback(message, thread_id, language)
@@ -592,7 +593,7 @@ async def run_agent_stream(
     gemini_api_key: str = "",
     custom_prompt: str = "",
     language: str = "en",
-    agent_name: str = "Worklink Assistant",
+    agent_name: str = DEFAULT_AGENT_NAME,
 ):
     # Check for authorization callback interception
     intercepted, response_text = await _handle_authorization_callback(message, thread_id, language)
