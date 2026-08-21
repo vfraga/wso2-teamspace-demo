@@ -32,6 +32,15 @@ x-common-env: &common-env
   # address, so without this the rate limiter puts them all in one bucket.
   # Safe here because the only thing in front of these services is Docker.
   RATE_LIMIT_TRUST_FORWARDED_FOR: "true"
+  # Basic-auth credentials for the ONE management call that has no /o
+  # organization equivalent: assigning teamspace-user to a freshly provisioned
+  # SCIM agent, which lives in the root-level AGENT userstore. Without these the
+  # portal creates the agent, silently fails the role assignment, and the agent's
+  # OBO token comes back with only `openid` — no *_agent scopes.
+  # Username is derived from IS_ORG_HANDLE; only the password must be supplied.
+  IS_ADMIN_USERNAME: ${IS_ADMIN_USERNAME:-}
+  IS_ADMIN_PASSWORD: ${IS_ADMIN_PASSWORD:-}
+  IS_TENANT_ADMIN_PASSWORD: ${IS_TENANT_ADMIN_PASSWORD:-}
   DATABASE_URL: ${DATABASE_URL:-sqlite:////data/teamspace.db}
   ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5001}
   REDIS_URL: redis://redis:6379/0
