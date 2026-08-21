@@ -105,8 +105,8 @@ services:
     # Not published. NOTE: the OBO consent popup is opened by the *browser*
     # against AGENT_REDIRECT_URI, so if you demo that flow through compose you
     # must publish this port and set AGENT_REDIRECT_URI to match.
-    # ports:
-    #   - "8000:8000"
+    ports:
+      - "8000:8000"
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/health"]
       interval: 10s

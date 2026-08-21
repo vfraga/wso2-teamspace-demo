@@ -158,13 +158,18 @@ def create_app() -> Flask:
         response.headers["X-Frame-Options"] = "DENY"
         is_prod = os.getenv("FLASK_ENV") == "production"
         if is_prod:
+            # Alpine's default CDN build compiles x-data / @click with `new Function`,
+            # which CSP treats as 'unsafe-eval'. 'unsafe-inline' is already required
+            # for those attributes; the Alpine CSP build would mean rewriting every
+            # template onto Alpine.data(). connect-src includes the script CDNs so
+            # DevTools can fetch .map files (DOMPurify's is the noisy one).
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
                 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
                 "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
-                "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; "
                 "img-src 'self' data: https:; "
-                "connect-src 'self'"
+                "connect-src 'self' https://unpkg.com https://cdn.jsdelivr.net"
             )
         if request.is_secure:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
